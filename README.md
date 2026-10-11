@@ -171,6 +171,10 @@ Release 包含 Windows 安装版、便携版、两种 macOS DMG、签名更新�
 
 Windows 先签应用程序，再生成安装包并签安装包；更改安装包后必须重新生成 Tauri 更新签名。macOS 应用与 DMG 完成 Developer ID 签名和 Apple 公证后，再从最终应用生成更新归档及签名。未完成公证的新版不替换官网已公证的下载包。
 
+macOS 签名和公证在 GitHub Actions 的 Apple Silicon / Intel runner 上自动完成，不需要本地 Mac。推送版本标签会自动使用证书；也可在 **Actions → Desktop checks and packages → Run workflow** 选择 `main`，保持 `notarize_macos` 勾选，生成两种已公证 DMG 和签名更新归档供下载。手动运行不会覆盖线上 Release。Windows Authenticode 签名与官网同步仍按现有发布流程处理。
+
+仓库 Actions Secrets 需配置 `APPLE_CERTIFICATE`（仅 Developer ID Application 身份的加密 PKCS#12，经 base64 编码）、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_PASSWORD`（Apple App 专用密码）、`APPLE_TEAM_ID`。每次运行会导入临时钥匙串，验证 Apple 公证凭证，完成后清理；普通主分支与 PR 构建不会导入证书。应用公证票据和更新归档中的票据都会验证，DMG 公证回执单独保存在 Actions artifact 中。
+
 签名私钥放在仓库 Actions Secret `TAURI_SIGNING_PRIVATE_KEY`，公钥配置在 `src-tauri/tauri.conf.json`。Tauri 更新签名用于校验更新文件，不是 Windows Authenticode 签名或 Apple 公证。
 
 下载全部 Release 附件后，可以核验三端更新签名和篡改拒绝：
