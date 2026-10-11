@@ -1,0 +1,71 @@
+name: Sign notarized macOS packages for app updates
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release version (without v)
+        required: true
+        type: string
+      arm64_sha256:
+        description: SHA256 of the notarized Apple Silicon update archive
+        required: true
+        type: string
+      x64_sha256:
+        description: SHA256 of the notarized Intel update archive
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: sign-macos-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  sign:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Fetch and check the notarized update archives
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          ARM64_SHA256: ${{ inputs.arm64_sha256 }}
+          X64_SHA256: ${{ inputs.x64_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$ARM64_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$X64_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          test "$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")" = "$VERSION"
+          mkdir signing-input
+          for arch in arm64 x64; do
+            name="NodeCloak_${VERSION}_macos_${arch}_update.app.tar.gz"
+            gh release download "v$VERSION" --pattern "$name" --dir signing-input
+            if [ "$arch" = arm64 ]; then expected="$ARM64_SHA256"; else expected="$X64_SHA256"; fi
+            printf '%s  %s\n' "$expected" "signing-input/$name" | sha256sum -c -
+          done
+      - name: Sign final app update archives
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          for arch in arm64 x64; do
+            node scripts/tauri.mjs signer sign --app-version "$VERSION" "signing-input/NodeCloak_${VERSION}_macos_${arch}_update.app.tar.gz"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-update-signatures
+          path: signing-input/*.sig
+          if-no-files-found: error
