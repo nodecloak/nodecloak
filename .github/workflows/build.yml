@@ -5,6 +5,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      notarize_macos:
+        description: Sign and notarize both macOS packages (main branch only)
+        type: boolean
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -26,7 +31,9 @@ jobs:
             platform: macos-x64
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
+    env:
+      MACOS_NOTARIZE: ${{ startsWith(matrix.platform, 'macos-') && ((github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.notarize_macos)) && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,12 +53,34 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Import Developer ID and validate notarization credentials
+        if: env.MACOS_NOTARIZE == 'true'
+        run: node scripts/macos-signing.mjs prepare
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: Build desktop packages
         run: node scripts/build-desktop.mjs
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ ((github.event_name == 'push' && github.ref_type == 'tag') || env.MACOS_NOTARIZE == 'true') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          APPLE_ID: ${{ env.MACOS_NOTARIZE == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ env.MACOS_NOTARIZE == 'true' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ env.MACOS_NOTARIZE == 'true' && secrets.APPLE_TEAM_ID || '' }}
+      - name: Notarize DMG and sign final updater archive
+        if: env.MACOS_NOTARIZE == 'true'
+        run: node scripts/macos-signing.mjs finish
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+      - name: Remove temporary signing credentials
+        if: always() && runner.os == 'macOS'
+        run: node scripts/macos-signing.mjs cleanup
       - name: Collect release packages
         run: node scripts/collect-release-assets.mjs ${{ matrix.platform }}
         env:
@@ -67,6 +96,13 @@ jobs:
           path: |
             release-assets/*
             release-notices/**
+          if-no-files-found: error
+      - name: Save macOS notarization receipt
+        if: env.MACOS_NOTARIZE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: notarization-${{ matrix.platform }}
+          path: notarization-receipts/**
           if-no-files-found: error
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
