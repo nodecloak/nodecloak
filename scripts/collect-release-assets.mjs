@@ -10,7 +10,7 @@ const names=packageNames(version);
 const files=platform==='windows-x64'
   ? [[`bundle/nsis/NodeCloak_${version}_x64-setup.exe`,names[0]],['nodecloak.exe',names[1]]]
   : [[`bundle/dmg/NodeCloak_${version}_${platform==='macos-arm64'?'aarch64':'x64'}.dmg`,names[platform==='macos-arm64'?2:3]]];
-if(process.env.RELEASE_TAG) {
+if(process.env.RELEASE_TAG || (process.platform==='darwin' && process.env.MACOS_NOTARIZE==='true')) {
   if(platform==='windows-x64') files.push([`${files[0][0]}.sig`,`${names[0]}.sig`]);
   else {
     const name=`NodeCloak_${version}_${platform.replace('-','_')}_update.app.tar.gz`;
