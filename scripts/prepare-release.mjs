@@ -20,7 +20,7 @@ for(const [platform,name] of Object.entries(names)) {
 }
 // Update notices list only implemented features and bug fixes.
 const releaseNotes=[
-  "修复 UTC+8 被误报为建议调整的问题；UTC 偏移改为只读信息，不再引导修改系统时区。 / Fixed UTC+8 being incorrectly flagged for adjustment; the UTC offset is now read-only and no longer prompts a system timezone change."
+  "修复 Windows 自动更新后缺失的开始菜单入口无法恢复的问题，更新时会补建 NodeCloak 快捷方式。 / Windows updates now restore a missing NodeCloak Start menu shortcut."
 ];
 const manifest={version,notes:releaseNotes.map(note=>`- ${note}`).join('\n'),pub_date:new Date().toISOString(),platforms};
 fs.writeFileSync(path.join(directory,'latest.json'),JSON.stringify(manifest,null,2)+'\n');

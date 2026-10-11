@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "NodeCloak",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "identifier": "com.nodecloak",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -37,7 +37,12 @@
       "icons/icon.ico"
     ],
     "shortDescription": "Independent browser workspaces, proxies and environment diagnostics",
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
   },
   "plugins": {
     "updater": {

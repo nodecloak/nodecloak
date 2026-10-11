@@ -56,6 +56,9 @@ jobs:
         run: node scripts/collect-release-assets.mjs ${{ matrix.platform }}
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - name: Verify Start menu shortcuts on installs and updates
+        if: runner.os == 'Windows'
+        run: node --test scripts/windows-shortcut-checks.mjs
       - name: Collect third-party notices
         run: node scripts/collect-release-notices.mjs ${{ matrix.platform }} ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
