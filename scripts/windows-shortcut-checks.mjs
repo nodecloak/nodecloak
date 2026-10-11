@@ -86,7 +86,9 @@ ${redirect(create[0])}
     if (!scenario.expected) return;
     if (original) assert.deepEqual(fs.readFileSync(link), original, 'Existing shortcut must not be rewritten');
     const shortcut = JSON.parse(run('powershell.exe', ['-NoProfile', '-Command', `$s=(New-Object -ComObject WScript.Shell).CreateShortcut(${quote(link)}); $f=(New-Object -ComObject Shell.Application).NameSpace(${quote(programs)}).ParseName('NodeCloak.lnk'); @{Target=$s.TargetPath; AppId=$f.ExtendedProperty('System.AppUserModel.ID')} | ConvertTo-Json -Compress`], temporary));
-    assert.equal(shortcut.Target.toLowerCase(), target.toLowerCase());
+    // Windows shell links expand DOS 8.3 names (e.g. runner~1); compare the
+    // actual files, rather than rejecting two spellings of the same path.
+    assert.equal(fs.realpathSync.native(shortcut.Target).toLowerCase(), fs.realpathSync.native(target).toLowerCase());
     if (!original) assert.equal(shortcut.AppId, 'com.nodecloak');
   });
 }
