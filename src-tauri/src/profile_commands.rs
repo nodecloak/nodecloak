@@ -431,6 +431,7 @@ pub async fn restart_profile(app: tauri::AppHandle, id: String) -> Result<(), St
 }
 #[tauri::command]
 pub async fn prepare_application_update(app: tauri::AppHandle) -> Result<(), String> {
+    crate::app_proxy::commands::stop_before_exit(&app).await?;
     operation(app, |root, runtime| {
         for p in profiles::load(root)? {
             if profiles::running(root, &p)? {
@@ -449,6 +450,7 @@ pub async fn prepare_application_update(app: tauri::AppHandle) -> Result<(), Str
 }
 #[tauri::command]
 pub async fn quit_application(app: tauri::AppHandle, close_profiles: bool) -> Result<(), String> {
+    crate::app_proxy::commands::stop_before_exit(&app).await?;
     let closing = app.clone();
     operation(app, move |root, runtime| {
         let active = profiles::load(root)?

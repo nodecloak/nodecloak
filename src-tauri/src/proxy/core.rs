@@ -29,6 +29,9 @@ fn trace(message: &str) {
         eprintln!("proxy-core: {message}");
     }
 }
+pub(crate) fn embedded()->(&'static [u8],&'static str){
+    (include_bytes!(concat!(env!("OUT_DIR"),"/core.gz")),include_str!(concat!(env!("OUT_DIR"),"/core.sha256")))
+}
 
 #[cfg(windows)]
 struct ChildJob(windows_sys::Win32::Foundation::HANDLE);
@@ -332,8 +335,8 @@ pub fn run_stdio() -> Result<(), String> {
         "sing-box"
     });
     use sha2::{Digest, Sha256};
-    let mut decoder =
-        flate2::read::GzDecoder::new(&include_bytes!(concat!(env!("OUT_DIR"), "/core.gz"))[..]);
+    let (compressed,expected_hash)=embedded();
+    let mut decoder = flate2::read::GzDecoder::new(compressed);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -356,7 +359,7 @@ pub fn run_stdio() -> Result<(), String> {
     }
     drop(file);
     if format!("{:x}", digest.finalize())
-        != include_str!(concat!(env!("OUT_DIR"), "/core.sha256")).trim()
+        != expected_hash.trim()
     {
         return Err("内置代理程序校验失败".into());
     }

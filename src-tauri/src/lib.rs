@@ -1,4 +1,9 @@
 mod autostart;
+mod app_proxy;
+pub fn run_app_proxy_helper(suffix:&str,parent:u32)->Result<(),String>{
+    #[cfg(windows)] {tauri::async_runtime::block_on(app_proxy::helper::run(suffix,parent))}
+    #[cfg(not(windows))] {let _=(suffix,parent);Err("应用代理当前仅支持 Windows".into())}
+}
 mod browser_control;
 mod browser_sites;
 mod claude_probe;
@@ -505,6 +510,7 @@ pub fn run() {
             }
         }))
         .manage(OperationLock::default())
+        .manage(app_proxy::runtime::Runtime::default())
         .manage(autostart::StartupState::default())
         .manage(mcp::Runtime::default())
         .manage(profiles::Runtime::default())
@@ -575,6 +581,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            app_proxy::commands::application_proxy_action,
             autostart::get_autostart_enabled,
             autostart::set_autostart_enabled,
             mcp::mcp_status,

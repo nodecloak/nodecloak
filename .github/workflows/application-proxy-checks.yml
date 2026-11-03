@@ -1,0 +1,37 @@
+name: Application proxy checks
+on:
+  push:
+    branches: ['codex/application-proxy']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-tun:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+      - run: npm ci
+      - run: node scripts/prepare-singbox.mjs
+      - run: npm test
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin nodecloak
+      - name: Real TUN routing and owned teardown
+        shell: pwsh
+        run: |
+          $env:NODECLOAK_TEST_APP_PROXY_HOST="$env:GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"
+          $env:NODECLOAK_TEST_SINGBOX="$env:GITHUB_WORKSPACE/.tools/singbox/win32-x64/sing-box.exe"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib installed_core_accepts_application_configs_without_network_changes -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_application_proxy_routes_tcp_udp_and_releases_only_owned_network -- --ignored --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
