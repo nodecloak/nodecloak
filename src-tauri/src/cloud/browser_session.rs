@@ -438,6 +438,9 @@ struct Browser {
     eval_target: Option<String>,
     eval_context: Option<(String, i64)>,
 }
+#[cfg(test)]
+#[path = "session_close_checks.rs"]
+mod close_checks;
 impl Browser {
     fn launch(browser: &str, path: &Path) -> Result<Self, String> {
         let exe = platform::browser_path(browser)?;
@@ -956,16 +959,45 @@ impl Browser {
         Ok(())
     }
     fn close(&mut self) -> Result<(), String> {
-        let _ = self.send(
-            if self.firefox {
-                "browser.close"
-            } else {
-                "Browser.close"
-            },
-            json!({}),
-            false,
-        );
         let start = Instant::now();
+        // The close acknowledgement is not process completion. Firefox's remote
+        // server also needs its WebSocket connection released to finish shutdown.
+        // Keep this handshake inside the existing shutdown budget, rather than
+        // using call(), whose normal storage-operation timeout is 120 seconds.
+        if let MaybeTlsStream::Plain(tcp) = self.socket.get_mut() {
+            let _ = tcp.set_read_timeout(Some(Duration::from_millis(100)));
+            let _ = tcp.set_write_timeout(Some(Duration::from_secs(1)));
+        }
+        let method = if self.firefox {
+            "browser.close"
+        } else {
+            "Browser.close"
+        };
+        if let Ok(id) = self.send(method, json!({}), false) {
+            while start.elapsed() < Duration::from_secs(1) {
+                match self.socket.read() {
+                    Ok(Message::Text(text)) => {
+                        if serde_json::from_str::<Value>(&text)
+                            .ok()
+                            .is_some_and(|v| v["id"] == id)
+                        {
+                            break;
+                        }
+                    }
+                    Ok(Message::Close(_)) => break,
+                    Err(tungstenite::Error::Io(e))
+                        if matches!(e.kind(),
+                            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {}
+                    Err(_) => break,
+                    _ => {}
+                }
+            }
+        }
+        let _ = self.socket.close(None);
+        let _ = self.socket.flush();
+        if let MaybeTlsStream::Plain(tcp) = self.socket.get_mut() {
+            let _ = tcp.shutdown(std::net::Shutdown::Both);
+        }
         while start.elapsed() < Duration::from_secs(15) {
             if self
                 .child
