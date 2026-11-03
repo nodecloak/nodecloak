@@ -37,6 +37,26 @@ jobs:
       - run: npm ci
       - run: node scripts/prepare-singbox.mjs
       - run: npm run build
+      - name: Record actual runner and browser versions
+        run: |
+          sw_vers
+          uname -m
+          if [ ! -x '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' ]; then
+            brew install --cask microsoft-edge
+          fi
+          if [ ! -x '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' ]; then
+            brew install --cask google-chrome
+          fi
+          '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' --version
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --version
+      - name: Native lock unit regression
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked platform::singleton -- --nocapture
+      - name: Three native Edge and Chrome close/reopen cycles
+        env:
+          NODECLOAK_TEST_HEADLESS_BROWSERS: '1'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked native_macos_chromium_profiles_reopen_with_persistent_singleton_files -- --ignored --nocapture --test-threads=1
+      - name: Complete Rust regression
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - name: Prepare native Firefox executable
         run: |
           if [ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]; then
