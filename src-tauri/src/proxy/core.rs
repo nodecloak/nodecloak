@@ -124,12 +124,21 @@ impl Core {
         let status = core.status.clone();
         std::thread::spawn(move || {
             let mut message = [0u8; 1];
-            if output.read_exact(&mut message).is_ok() && message == [b'R'] {
-                status.store(1, Ordering::Release);
-                // EOF is a second independent indication that the helper/core
-                // has exited. No secrets or upstream log text cross this pipe.
-                let _ = output.read(&mut message);
+            // P: verified executable prepared; R: owned listener bound. These
+            // separate preparation and listener budgets without trusting ports.
+            while output.read_exact(&mut message).is_ok() {
+                match message[0] {
+                    b'P' if status.load(Ordering::Acquire) == 0 => {
+                        status.store(3, Ordering::Release)
+                    }
+                    b'R' if status.load(Ordering::Acquire) == 3 => {
+                        status.store(1, Ordering::Release)
+                    }
+                    _ => break,
+                }
             }
+            // EOF independently marks helper/core exit. No upstream text crosses
+            // this pipe.
             status.store(2, Ordering::Release);
         });
         let mut input = core
@@ -199,11 +208,27 @@ pub async fn start(up: Upstream) -> Result<(Upstream, Arc<Core>), String> {
             },
             password,
         };
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while core.running() && Instant::now() < deadline {
-            // An authenticated local CONNECT that is rejected by the proxy
-            // proves the listener belongs to this generated configuration,
-            // without dialing any user node or public website.
+        let began = Instant::now();
+        let preparation_deadline = began + Duration::from_secs(30);
+        let hard_deadline = began + Duration::from_secs(35);
+        let mut listener_deadline = None;
+        while core.running() && Instant::now() < hard_deadline {
+            let state = core.status.load(Ordering::Acquire);
+            if state == 2 {
+                break;
+            }
+            if state == 0 && Instant::now() >= preparation_deadline {
+                break;
+            }
+            if state == 3 || state == 1 {
+                let deadline = listener_deadline
+                    .get_or_insert_with(|| Instant::now() + Duration::from_secs(5));
+                if Instant::now() >= *deadline {
+                    break;
+                }
+            }
+            // The owned startup channel establishes listener ownership. Only
+            // then perform the local functional check; never dial a user node.
             if core.alive() && ready(&internal).await {
                 return Ok((internal, core));
             }
@@ -268,6 +293,15 @@ pub fn run_stdio() -> Result<(), String> {
     // arbitrary TUN, route manipulation, services, API or DNS listeners.
     validate_helper_config(&config)?;
     trace("generated config accepted");
+    // Watch ownership before expensive preparation, not only after spawn.
+    // A cancelled launch must never finish extraction and start a new core.
+    drop(input);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut rest = [0u8; 1];
+        let _ = std::io::stdin().read(&mut rest);
+        let _ = tx.send(());
+    });
     let directory = tempfile::Builder::new()
         .prefix("nodecloak-core-")
         .tempdir()
@@ -297,17 +331,35 @@ pub fn run_stdio() -> Result<(), String> {
     } else {
         "sing-box"
     });
-    let mut decompressed = Vec::new();
-    flate2::read::GzDecoder::new(&include_bytes!(concat!(env!("OUT_DIR"), "/core.gz"))[..])
-        .read_to_end(&mut decompressed)
-        .map_err(|_| "内置代理程序损坏")?;
     use sha2::{Digest, Sha256};
-    if format!("{:x}", Sha256::digest(&decompressed))
+    let mut decoder =
+        flate2::read::GzDecoder::new(&include_bytes!(concat!(env!("OUT_DIR"), "/core.gz"))[..]);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&binary)
+        .map_err(|_| "无法准备内置代理程序")?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        if rx.try_recv().is_ok() {
+            trace("owner pipe closed during preparation");
+            return Ok(());
+        }
+        let count = decoder.read(&mut buffer).map_err(|_| "内置代理程序损坏")?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+        file.write_all(&buffer[..count])
+            .map_err(|_| "无法准备内置代理程序")?;
+    }
+    drop(file);
+    if format!("{:x}", digest.finalize())
         != include_str!(concat!(env!("OUT_DIR"), "/core.sha256")).trim()
     {
         return Err("内置代理程序校验失败".into());
     }
-    std::fs::write(&binary, decompressed).map_err(|_| "无法准备内置代理程序")?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -315,6 +367,14 @@ pub fn run_stdio() -> Result<(), String> {
             .map_err(|_| "无法设置代理程序权限")?;
     }
     trace("owned executable prepared");
+    if rx.try_recv().is_ok() {
+        trace("owner pipe closed before spawn");
+        return Ok(());
+    }
+    std::io::stdout()
+        .write_all(b"P")
+        .and_then(|_| std::io::stdout().flush())
+        .map_err(|_| "代理状态通道已关闭")?;
     let mut child = crate::platform::command(binary.to_str().ok_or("代理程序路径无效")?)
         .args(["run", "--disable-color", "-c", "stdin"])
         .current_dir(directory.path())
@@ -389,15 +449,6 @@ pub fn run_stdio() -> Result<(), String> {
         // or forwarding them; only the startup event crosses the private pipe.
         let _ = std::io::copy(&mut reader, &mut std::io::sink());
     });
-    // The parent keeps this pipe open for the lifetime of its relay. Normal
-    // drop and an abrupt parent exit both produce EOF and close only this core.
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut rest = [0u8; 1];
-        let _ = std::io::stdin().read(&mut rest);
-        let _ = tx.send(());
-    });
-    drop(input);
     let mut announced = false;
     loop {
         if !announced && startup_rx.try_recv().is_ok() {

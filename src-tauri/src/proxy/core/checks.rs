@@ -505,6 +505,26 @@ fn installed_core_isolated_nodes_first_hop_shutdown_and_fail_closed() {
         pipe_core.input.lock().unwrap().take();
         wait_removed(&pipe_binary).await;
         assert!(!pipe_core.alive());
+        // Cancellation before preparation completes must not start a late core.
+        let up = Upstream {
+            config: serde_json::from_value(
+                json!({"mode":"vless","host":"node.invalid","port":443,"node":{}}),
+            )
+            .unwrap(),
+            password: uuid::Uuid::new_v4().to_string(),
+        };
+        let cancelled =
+            Core::spawn(&node::config(&up, free_port(), "fixture", "fixture").unwrap()).unwrap();
+        cancelled.input.lock().unwrap().take();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while cancelled.running() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            !cancelled.running(),
+            "cancelled preparation did not release its helper"
+        );
+        drop(cancelled);
         #[cfg(windows)]
         {
             let up = Upstream {
