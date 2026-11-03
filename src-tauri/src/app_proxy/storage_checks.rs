@@ -41,7 +41,7 @@ fn draft() -> DestinationDraft {
 }
 #[test]
 fn destinations_persist_without_passwords_and_rules_stay_disabled() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let vault = Vault::default();
     let saved = store::save_node(root.path(), draft(), &vault).unwrap();
     assert_eq!(saved.rules.len(), 3);
@@ -61,7 +61,7 @@ fn destinations_persist_without_passwords_and_rules_stay_disabled() {
 }
 #[test]
 fn changing_destination_cannot_send_previous_credentials_to_new_endpoint() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let vault = Vault::default();
     let first = store::save_node(root.path(), draft(), &vault).unwrap();
     let mut change = draft();
@@ -75,7 +75,7 @@ fn changing_destination_cannot_send_previous_credentials_to_new_endpoint() {
 }
 #[test]
 fn name_only_edit_keeps_secret_but_clear_removes_it() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let vault = Vault::default();
     let first = store::save_node(root.path(), draft(), &vault).unwrap();
     let mut change = draft();

@@ -723,7 +723,7 @@ mod checks {
     use serde_json::json;
     #[test]
     fn restart_keeps_diagnostics_but_never_restores_a_running_session() {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
         let first = Runtime::default();
         first.event(root.path(), "synthetic", "Synthetic lifecycle event");
         let next = Runtime::default();
