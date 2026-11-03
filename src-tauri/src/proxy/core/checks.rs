@@ -145,16 +145,56 @@ fn generated_config_cannot_modify_system_network_and_first_hop_is_node_dialer() 
 }
 
 #[test]
-fn helper_accepts_supported_node_tls_and_transport_combinations(){
-    for mode in ["vless","vmess"]{for transport in ["tcp","ws","httpupgrade","grpc"]{for tls in ["none","tls","reality"]{
-        if mode=="vmess"&&tls=="reality"{continue;}
-        let mut options=node::NodeOptions::default();options.transport=transport.into();options.tls=tls.into();
-        if tls!="none"{options.server_name="node.invalid".into();options.fingerprint="chrome".into();options.alpn=vec!["h2".into()];}
-        if tls=="reality"{options.public_key="A".repeat(43);options.short_id="0123".into();}
-        if transport=="grpc"{options.service_name="fixture".into();}else if transport!="tcp"{options.path="/fixture".into();options.host="cdn.invalid".into();}
-        let up=Upstream{config:ProxyConfig{mode:mode.into(),host:"node.invalid".into(),port:443,node:Some(options),pre_proxy:Some(LocalProxy{mode:"https".into(),host:"first.invalid".into(),port:443}),..Default::default()},password:uuid::Uuid::new_v4().to_string()};
-        assert!(validate_helper_config(&node::config(&up,12345,"fixture","fixture").unwrap()).is_ok(),"{mode}/{transport}/{tls}");
-    }}}
+fn helper_accepts_supported_node_tls_and_transport_combinations() {
+    for mode in ["vless", "vmess"] {
+        for transport in ["tcp", "ws", "httpupgrade", "grpc"] {
+            for tls in ["none", "tls", "reality"] {
+                if mode == "vmess" && tls == "reality" {
+                    continue;
+                }
+                let mut options = node::NodeOptions::default();
+                options.transport = transport.into();
+                options.tls = tls.into();
+                if tls != "none" {
+                    options.server_name = "node.invalid".into();
+                    options.fingerprint = "chrome".into();
+                    options.alpn = vec!["h2".into()];
+                }
+                if tls == "reality" {
+                    options.public_key = "A".repeat(43);
+                    options.short_id = "0123".into();
+                }
+                if transport == "grpc" {
+                    options.service_name = "fixture".into();
+                } else if transport != "tcp" {
+                    options.path = "/fixture".into();
+                    options.host = "cdn.invalid".into();
+                }
+                let up = Upstream {
+                    config: ProxyConfig {
+                        mode: mode.into(),
+                        host: "node.invalid".into(),
+                        port: 443,
+                        node: Some(options),
+                        pre_proxy: Some(LocalProxy {
+                            mode: "https".into(),
+                            host: "first.invalid".into(),
+                            port: 443,
+                        }),
+                        ..Default::default()
+                    },
+                    password: uuid::Uuid::new_v4().to_string(),
+                };
+                assert!(
+                    validate_helper_config(
+                        &node::config(&up, 12345, "fixture", "fixture").unwrap()
+                    )
+                    .is_ok(),
+                    "{mode}/{transport}/{tls}"
+                );
+            }
+        }
+    }
 }
 
 #[test]

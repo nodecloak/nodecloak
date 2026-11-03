@@ -1,5 +1,8 @@
 name: Profile proxy checks
 on:
+  push:
+    branches: ['codex/**']
+    paths: ['.github/workflows/profile-proxy-checks.yml']
   workflow_dispatch:
     inputs:
       platform:
