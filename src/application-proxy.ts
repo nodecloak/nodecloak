@@ -10,7 +10,7 @@ export interface AppProxyView {supported:boolean;simulation?:boolean;settings:{v
 const apps=[{id:'codex',name:'Codex'},{id:'chatgpt',name:'ChatGPT'},{id:'claude',name:'Claude'}];
 const demo:AppProxyView={supported:true,simulation:true,settings:{version:1,proxies:[],rules:apps.map((a,i)=>({id:`demo-${i}`,app:a.id as AppProxyRule['app'],executable:'',proxyId:null,enabled:false}))},apps:apps.map(a=>({...a,paths:[`C:\\Demo\\${a.name}\\${a.id==='codex'?'ChatGPT':a.name}.exe`],running:0})),discoveryChecked:true,runtime:{phase:'off',interface:null,since:null,error:null,needsCleanup:false,connections:[],events:[],warnings:[]}};
 export async function applicationProxy(action:string,payload?:unknown):Promise<AppProxyView>{
- if(native)return invoke('application_proxy_action',{action,payload:payload??null});
+ if(native){const view=await invoke<AppProxyView>('application_proxy_action',{action,payload:payload??null});if(!['read','discover'].includes(action))window.dispatchEvent(new Event('nodecloak-application-proxy-change'));return view;}
  const data=payload as Record<string,unknown>|undefined;
  if(action==='start'){
   if(!demo.settings.rules.some(r=>r.enabled&&r.proxyId))throw new Error('请至少为一个已安装应用选择代理节点');
@@ -25,6 +25,7 @@ export async function applicationProxy(action:string,payload?:unknown):Promise<A
   demo.settings.proxies=demo.settings.proxies.filter(p=>p.id!==data?.id);
   demo.settings.rules=demo.settings.rules.map(r=>r.proxyId===data?.id?{...r,proxyId:null,enabled:false}:r);
  }
+ if(!['read','discover'].includes(action))window.dispatchEvent(new Event('nodecloak-application-proxy-change'));
  return structuredClone(demo);
 }
 export async function chooseProxyExecutable():Promise<string|null>{return native?invoke('application_proxy_action',{action:'pickExecutable',payload:null}):'C:\\Demo\\Custom\\Example.exe';}

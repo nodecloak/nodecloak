@@ -102,6 +102,16 @@ fn overlapping_package_version_patterns_cannot_choose_different_nodes() {
     assert!(config::compile(&[first, second], &[proxy()], 51234, &"a".repeat(64), ID).is_err());
 }
 #[test]
+fn custom_exact_path_cannot_overlap_an_enabled_detected_app_family() {
+    let first = rule(
+        r"C:\Program Files\WindowsApps\OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe",
+    );
+    let mut custom = first.clone();
+    custom.id = "25a62d5a-dde0-4932-a008-5277d7343efa".into();
+    custom.exact_paths = true;
+    assert!(config::compile(&[first, custom], &[proxy()], 51234, &"a".repeat(64), ID).is_err());
+}
+#[test]
 fn app_tun_routes_only_assigned_paths_and_preserves_system_dns_and_browser_relays() {
     let v = config::compile(
         &[rule(r"C:\Apps\Codex.exe")],

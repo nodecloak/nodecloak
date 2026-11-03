@@ -40,3 +40,26 @@ it('dismisses a persisted runtime error without changing routing state',async()=
  await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="关闭提示"]')!.click());
  expect(host.querySelector('[role="alert"]')).toBeNull();expect(api.call.mock.calls.some(([a])=>a==='start')).toBe(false);
 });
+it('can cancel a pending start without accepting its late running response',async()=>{
+ let finish!:(value:AppProxyView)=>void;
+ api.call.mockImplementation(async(action:string)=>{if(action==='start')return new Promise<AppProxyView>(resolve=>{finish=resolve;});return structuredClone(view);});
+ await act(async()=>root.render(<ApplicationProxy/>));await act(async()=>button('开启应用代理')!.click());
+ await act(async()=>button('取消启动')!.click());
+ expect(api.call.mock.calls.some(([a])=>a==='stop')).toBe(true);
+ const late=structuredClone(view);late.runtime.phase='running';await act(async()=>finish(late));
+ expect(button('开启应用代理')).toBeDefined();expect(button('停止应用代理')).toBeUndefined();
+});
+it('selecting a destination saves only that application rule and does not start TUN',async()=>{
+ const id='0b4fcb93-ec83-4f9b-996a-f89f7aa96025';
+ view.settings.proxies=[{id,name:'Local test',hasPassword:false,proxy:{mode:'socks5',host:'127.0.0.1',port:1080,username:''}}];
+ view.settings.rules=[{id:'app-rule',app:'codex',executable:'',proxyId:null,enabled:false}];view.apps=[{id:'codex',name:'Codex',paths:['C:\\Apps\\Codex.exe'],running:1}];
+ await act(async()=>root.render(<ApplicationProxy/>));const select=host.querySelector('select')!;
+ await act(async()=>{select.value=id;select.dispatchEvent(new Event('change',{bubbles:true}));});
+ expect(api.call).toHaveBeenCalledWith('saveRules',{rules:[{...view.settings.rules[0],proxyId:id,enabled:true}]});
+ expect(api.call.mock.calls.some(([a])=>a==='start')).toBe(false);
+});
+it('refreshes native cleanup state after a failed start so the user can stop it',async()=>{
+ api.call.mockImplementation(async(action:string)=>{if(action==='start'){view.runtime.phase='error';view.runtime.needsCleanup=true;view.runtime.error='接口正在释放';throw new Error('接口正在释放');}return structuredClone(view);});
+ await act(async()=>root.render(<ApplicationProxy/>));await act(async()=>button('开启应用代理')!.click());
+ expect(button('停止应用代理')).toBeDefined();
+});

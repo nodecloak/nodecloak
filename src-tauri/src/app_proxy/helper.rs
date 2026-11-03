@@ -85,15 +85,15 @@ pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
     let result: Result<(), String> = async {
         let (mut core, signal) = start.await.map_err(|_| "应用代理内核准备任务中断")??;
         let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(1))
-            .build()
-            .map_err(|_| "无法检查应用代理接口")?;
         let mut luid = None;
         let mut started = false;
         let outcome = async {
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(1))
+                .build()
+                .map_err(|_| "无法检查应用代理接口")?;
             while tokio::time::Instant::now() < deadline
                 && !cancel.load(Ordering::Acquire)
                 && parent_handle.alive()
@@ -164,9 +164,15 @@ pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
         .await;
         // Capture even a not-yet-UP interface before stopping the core. All
         // paths (including failed Ready writes and cancellation) use one teardown.
-        luid = network::owned_luid(&interface)?.or(luid);
-        core.stop()?;
-        wait_released(&interface, luid).await?;
+        let captured = network::owned_luid(&interface);
+        if let Ok(latest) = &captured {
+            luid = latest.or(luid);
+        }
+        let stopped = core.stop();
+        let released = wait_released(&interface, luid).await;
+        stopped?;
+        released?;
+        captured?;
         outcome?;
         ipc::write_frame(&mut output, &Reply::Stopped).await.ok();
         Ok(())

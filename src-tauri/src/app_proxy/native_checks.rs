@@ -82,10 +82,10 @@ impl Fixture {
                                 let _ = stream.read(&mut byte);
                             } else if request[1] == 1 {
                                 let _ = stream.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]);
-                                let mut bytes = [0; 128];
+                                let mut bytes = [0; 15];
                                 if stream
-                                    .read(&mut bytes)
-                                    .is_ok_and(|n| &bytes[..n] == b"nodecloak-probe")
+                                    .read_exact(&mut bytes)
+                                    .is_ok_and(|_| &bytes == b"nodecloak-probe")
                                 {
                                     hits.fetch_add(1, Ordering::AcqRel);
                                     let _ = stream.write_all(b"via-proxy");
@@ -254,14 +254,67 @@ async fn native_application_proxy_routes_tcp_udp_and_releases_only_owned_network
     let req = request(&paths[..3], fixture.port);
     let (mut pipe, helper, luid) = begin(&req).await;
     let name = super::config::interface_name(&req.session).unwrap();
+    println!(
+        "native rules: {}",
+        serde_json::to_string(&req.rules).unwrap()
+    );
+    println!(
+        "native routes: {}",
+        serde_json::to_string(&network::snapshot().unwrap()).unwrap()
+    );
+    let logs = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let captured = logs.clone();
+    let port = req.controller_port;
+    let secret = req.controller_secret.clone();
+    std::thread::spawn(move || {
+        use tungstenite::client::IntoClientRequest;
+        let mut request = format!("ws://127.0.0.1:{port}/logs?level=info")
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert("Authorization", format!("Bearer {secret}").parse().unwrap());
+        if let Ok((mut socket, _)) = tungstenite::connect(request) {
+            for _ in 0..128 {
+                match socket.read() {
+                    Ok(message) => {
+                        if let Ok(text) = message.into_text() {
+                            captured.lock().unwrap().push(text.to_string());
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+    });
     for (app, path) in &paths[..3] {
         for mode in ["tcp", "udp"] {
             let path = path.clone();
-            let output =
-                tokio::task::spawn_blocking(move || Command::new(path).arg(mode).output().unwrap())
-                    .await
-                    .unwrap();
-            assert!(output.status.success(), "{app} {mode}: {:?}", output);
+            let probe =
+                tokio::task::spawn_blocking(move || Command::new(path).arg(mode).output().unwrap());
+            tokio::time::sleep(Duration::from_millis(700)).await;
+            let connections = reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap()
+                .get(format!(
+                    "http://127.0.0.1:{}/connections",
+                    req.controller_port
+                ))
+                .bearer_auth(&req.controller_secret)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+            let output = probe.await.unwrap();
+            assert!(
+                output.status.success(),
+                "{app} {mode}: {:?}; connections={connections}; logs={:?}",
+                output,
+                logs.lock().unwrap()
+            );
             println!("synthetic {app} {mode}: assigned proxy observed");
         }
     }
@@ -315,4 +368,56 @@ async fn native_application_proxy_routes_tcp_udp_and_releases_only_owned_network
     exited(helper, &name, luid).await;
     assert_eq!(stable_network(), before);
     println!("normal stop, owner EOF, dead proxy: network restored; real applications still require separate traffic validation");
+    // Cancellation while preparing a privileged core must not wait for Ready.
+    let req = request(&paths[..3], fixture.port);
+    let (mut pipe, helper) = transport::connect_helper().await.unwrap();
+    ipc::write_frame(&mut pipe, &req).await.unwrap();
+    drop(pipe);
+    assert!(tokio::task::spawn_blocking(move || helper.wait(15000))
+        .await
+        .unwrap());
+    assert_eq!(
+        stable_network(),
+        before,
+        "cancelled startup left routing behind"
+    );
+    // Occupied diagnostic ports cannot impersonate an owned core's readiness.
+    let occupied = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut req = request(&paths[..3], fixture.port);
+    req.controller_port = occupied.local_addr().unwrap().port();
+    let (mut pipe, helper) = transport::connect_helper().await.unwrap();
+    ipc::write_frame(&mut pipe, &req).await.unwrap();
+    let reply: Reply = tokio::time::timeout(Duration::from_secs(75), ipc::read_frame(&mut pipe))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(reply, Reply::Failure { .. }),
+        "occupied controller accepted as ready"
+    );
+    drop(pipe);
+    assert!(tokio::task::spawn_blocking(move || helper.wait(15000))
+        .await
+        .unwrap());
+    assert_eq!(
+        stable_network(),
+        before,
+        "failed startup left routing behind"
+    );
+}
+
+#[test]
+#[ignore = "Read-only discovery on the current Windows desktop; prints no credentials"]
+fn installed_application_inventory_distinguishes_products() {
+    for app in super::discovery::discover().unwrap() {
+        println!(
+            "{}: {} executable paths, {} running processes",
+            app.name,
+            app.paths.len(),
+            app.running
+        );
+        for path in app.paths {
+            println!("  {path}");
+        }
+    }
 }

@@ -99,6 +99,23 @@ impl Default for Runtime {
     }
 }
 impl Runtime {
+    pub fn rejected_start(&self, root: &Path, error: &str) {
+        let log = if let Ok(mut state) = self.state.lock() {
+            if ["off", "error"].contains(&state.phase.as_str()) {
+                state.phase = "error".into();
+                state.error = Some(error.into());
+            }
+            state
+                .events
+                .last()
+                .is_none_or(|entry| entry.message != error)
+        } else {
+            false
+        };
+        if log {
+            self.event(root, "start_rejected", error);
+        }
+    }
     pub fn view(&self, root: &Path) -> Result<View, String> {
         if !self.history_loaded.swap(true, Ordering::AcqRel) {
             let path = root.join("application-proxy-events.jsonl");
@@ -702,6 +719,33 @@ fn connections(
 mod checks {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn restart_keeps_diagnostics_but_never_restores_a_running_session() {
+        let root = tempfile::tempdir().unwrap();
+        let first = Runtime::default();
+        first.event(root.path(), "synthetic", "Synthetic lifecycle event");
+        let next = Runtime::default();
+        let view = next.view(root.path()).unwrap();
+        assert_eq!(view.runtime.phase, "off");
+        assert!(!view.runtime.needs_cleanup);
+        assert!(view.runtime.connections.is_empty());
+        assert_eq!(view.runtime.events.len(), 1);
+        assert_eq!(view.runtime.events[0].event, "synthetic");
+        assert_eq!(next.view(root.path()).unwrap().runtime.events.len(), 1);
+    }
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cancellation_wakes_startup_without_waiting_for_readiness_timeout() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let wake = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            wake.store(true, Ordering::Release);
+        });
+        tokio::time::timeout(Duration::from_millis(500), wait_cancelled(cancel))
+            .await
+            .unwrap();
+    }
     #[test]
     fn connection_evidence_requires_both_the_assigned_proxy_and_the_application_path() {
         let id = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";

@@ -37,7 +37,12 @@ pub async fn application_proxy_action(
     }
     match action.as_str() {
         "discover" => runtime.discover().await?,
-        "start" => runtime.start(&root).await?,
+        "start" => {
+            if let Err(error) = runtime.start(&root).await {
+                runtime.rejected_start(&root, &error);
+                return Err(error);
+            }
+        }
         "stop" => runtime.stop(&root).await?,
         "saveNode" => {
             let _lock = runtime.gate.lock().await;

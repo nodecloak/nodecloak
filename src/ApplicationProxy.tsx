@@ -6,6 +6,12 @@ import {t} from './i18n';
 import './application-proxy.css';
 
 const active=(view:AppProxyView|null)=>!!view&&(['starting','running','stopping'].includes(view.runtime.phase)||view.runtime.needsCleanup);
+export function ApplicationProxyIndicator(){
+ const [status,setStatus]=useState<AppProxyView['runtime']|null>(null);
+ useEffect(()=>{let alive=true;const refresh=()=>{void applicationProxy('read').then(v=>{if(alive)setStatus(v.runtime);}).catch(()=>{});};refresh();const timer=window.setInterval(refresh,5000);window.addEventListener('nodecloak-application-proxy-change',refresh);return()=>{alive=false;window.clearInterval(timer);window.removeEventListener('nodecloak-application-proxy-change',refresh);};},[]);
+ const label=status?.phase==='running'?'已开启':status?.phase==='starting'?'正在启动':status?.phase==='stopping'||status?.needsCleanup?'正在停止':status?.phase==='error'?'需检查':null;
+ return label?<span className="ap-nav-status" title={t(label)}>{t(label)}</span>:null;
+}
 export default function ApplicationProxy(){
  const [view,setView]=useState<AppProxyView|null>(null),[error,setError]=useState(''),[pending,setPending]=useState('');
  const [editor,setEditor]=useState(false),[editing,setEditing]=useState<AppProxyDestination|null>(null),[name,setName]=useState(''),[uri,setUri]=useState(''),[first,setFirst]=useState(''),[firstMode,setFirstMode]=useState<LocalProxy['mode']>('http');
@@ -22,7 +28,9 @@ export default function ApplicationProxy(){
  async function action(kind:string,payload?:unknown){
   if(pending&&!(pending==='start'&&kind==='stop'))return;const e=++epoch.current;setPending(kind);setError('');setDismissed(null);
   try{const next=await applicationProxy(kind,payload);if(mounted.current&&e===epoch.current)setView(next);return next;}
-  catch(e){if(mounted.current)setError(String(e));}
+  catch(reason){
+   if(mounted.current&&e===epoch.current){setError(String(reason));try{const current=await applicationProxy('read');if(mounted.current&&e===epoch.current)setView(current);}catch{/* Preserve the original operation error. */}}
+  }
   finally{if(mounted.current&&e===epoch.current)setPending('');}
  }
  const locked=!!pending||active(view);

@@ -8,7 +8,7 @@ import AutostartSettings from './AutostartSettings';
 import {createEnvironmentCache,environmentScopeKey,type EnvironmentScope} from './environment-cache';
 import ThemeControl from './ThemeControl';
 import McpWorkspace from './McpWorkspace';
-import ApplicationProxy from './ApplicationProxy';
+import ApplicationProxy,{ApplicationProxyIndicator} from './ApplicationProxy';
 import {Network} from 'lucide-react';
 import {PlugZap,Cloud} from 'lucide-react';
 import {useCloudAccount,AccountButton,AccountDialog,CloudSettings} from './AccountWorkspace';
@@ -267,7 +267,7 @@ export default function App() {
     <aside className="sidebar">
       <div className="brand" data-tauri-drag-region="deep"><Mark /><span><span className="brand-node">Node</span><b>Cloak</b><small>BROWSER WORKSPACE</small></span></div>
       <span className="sidebar-label">{t("工作空间")}</span>
-      <nav aria-label={t("主导航")}>{nav.map(({ id, title, icon: Icon }) => <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} disabled={!!busy} onClick={() => void navigate(id)}><Icon size={18} strokeWidth={1.7} /><span>{t(title)}</span>{id==='sync'&&!!cloud.status.conflicts?.length&&<span className="nav-count">{new Set(cloud.status.conflicts.map(c=>c.localId)).size}</span>}{id==='sharing'&&sharing.data.received.some(s=>effectiveShareStatus(s)==='pending')&&<span className="nav-count">{sharing.data.received.filter(s=>effectiveShareStatus(s)==='pending').length}</span>}{id === 'overview' && warnings.length > 0 && <span className="nav-count">{warnings.length}</span>}{id === 'history' && history.filter(r => r.status === 'applied').length > 0 && <span className="nav-history-dot" />}</button>)}</nav>
+      <nav aria-label={t("主导航")}>{nav.map(({ id, title, icon: Icon }) => <button key={id} className={`nav-item ${page === id ? 'active' : ''}`} disabled={!!busy} onClick={() => void navigate(id)}><Icon size={18} strokeWidth={1.7} /><span>{t(title)}</span>{id==='appProxy'&&<ApplicationProxyIndicator/>}{id==='sync'&&!!cloud.status.conflicts?.length&&<span className="nav-count">{new Set(cloud.status.conflicts.map(c=>c.localId)).size}</span>}{id==='sharing'&&sharing.data.received.some(s=>effectiveShareStatus(s)==='pending')&&<span className="nav-count">{sharing.data.received.filter(s=>effectiveShareStatus(s)==='pending').length}</span>}{id === 'overview' && warnings.length > 0 && <span className="nav-count">{warnings.length}</span>}{id === 'history' && history.filter(r => r.status === 'applied').length > 0 && <span className="nav-history-dot" />}</button>)}</nav>
       <div className="sidebar-bottom"><div className="sidebar-footer"><AccountButton cloud={cloud} preferencesDisabled={!!busy} onPreferences={()=>{cloud.setPanel(null);setPage('settings');}} onAccountPage={next=>{cloud.setError('');cloud.setPanel(null);setPage(next);}}/><span>v{t(version)}</span></div></div>
     </aside>
     <main>

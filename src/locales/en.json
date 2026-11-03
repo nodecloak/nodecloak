@@ -1662,6 +1662,7 @@
   "Hysteria2 使用 UDP；链式连接需要前置 SOCKS5 支持 UDP 转发。": "Hysteria2 uses UDP. Chained connections require a SOCKS5 first hop with UDP forwarding.",
   "Hysteria2 需要支持 UDP 的 SOCKS5 前置代理": "Hysteria2 requires a SOCKS5 first hop with UDP support",
   "无法确认浏览器正常退出请求是否已发送": "Could not confirm that the normal browser quit request was sent",
+  "需检查": "Check",
   "关闭提示": "Dismiss message",
   "检测中": "Testing",
   "确认删除": "Confirm deletion",

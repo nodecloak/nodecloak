@@ -91,6 +91,10 @@ NodeCloak 在 Windows 和 macOS 上管理独立的 Chrome、Edge、Firefox 配�
 
 Chrome / Edge 使用真实的硬件指纹，没有提供任意 User Agent、Canvas / Audio 噪音或虚拟内存、核心数。选择语言「跟随 IP 匹配」时，浏览器通过原生自动化接口应用设置，网页可以读取自动化标记（`navigator.webdriver=true`）；自定义语言使用浏览器配置，不需要该接口。Firefox 严格指纹保护也可能影响网页显示、Canvas 和媒体功能。
 
+## Windows 应用代理
+
+独立的「应用代理」可为 Codex、ChatGPT、Claude 或指定 `.exe` 配置节点，默认关闭，开启时请求 Windows 管理员授权。按进程分流新连接，未匹配的应用直连，浏览器副本继续使用原来的代理配置。支持节点导入、前置代理以及连接与运行记录，详见[应用代理使用说明](docs/application-proxy.md)。
+
 ## 终端
 
 侧边栏中文显示「终端」，英文显示「Terminal」。支持以下入口：
