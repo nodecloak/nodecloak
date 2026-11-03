@@ -1,6 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+/// QueryFullProcessImageName returns a long image path. Resolve NTFS short names
+/// and file aliases before matching so selecting an existing executable cannot
+/// silently become a direct connection merely because TEMP used an 8.3 path.
+pub fn canonical_executable(path: &str) -> String {
+    #[cfg(windows)]
+    if let Ok(file) = std::fs::canonicalize(path) {
+        let value = file.to_string_lossy();
+        return value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned();
+    }
+    path.to_owned()
+}
+
 pub fn normalize(path: &str) -> String {
     path.strip_prefix(r"\\?\")
         .unwrap_or(path)

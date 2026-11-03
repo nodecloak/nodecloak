@@ -26,7 +26,7 @@ pub fn path_pattern(path: &str) -> String {
         }
         out
     }
-    let normalized = normalize(path);
+    let normalized = normalize(&super::discovery::canonical_executable(path));
     if super::discovery::identify(&normalized).is_some() {
         if let Some((root, tail)) = normalized.split_once(r"\windowsapps\") {
             if let Some((package, suffix)) = tail.split_once('\\') {
@@ -63,7 +63,7 @@ pub fn path_pattern(path: &str) -> String {
     exact_pattern(path)
 }
 pub fn exact_pattern(path: &str) -> String {
-    let normalized = normalize(path);
+    let normalized = normalize(&super::discovery::canonical_executable(path));
     let mut pattern = String::from("(?i)^");
     for c in normalized.chars() {
         if "\\.+*?()[]{}^$|".contains(c) {
@@ -94,7 +94,10 @@ pub fn valid_path(path: &str) -> bool {
         .contains(&path.rsplit('\\').next().unwrap_or(""))
         && !std::env::current_exe()
             .ok()
-            .and_then(|p| p.to_str().map(normalize))
+            .and_then(|p| {
+                p.to_str()
+                    .map(|s| normalize(&super::discovery::canonical_executable(s)))
+            })
             .is_some_and(|current| current == path)
 }
 pub fn compile(
@@ -185,7 +188,7 @@ pub fn compile(
         let mut paths = vec![];
         let mut local = HashSet::new();
         for path in &rule.paths {
-            if !valid_path(path) {
+            if !valid_path(path) || !valid_path(&super::discovery::canonical_executable(path)) {
                 return Err("请选择本机应用程序；系统及共享网络进程不能作为代理目标".into());
             }
             let pattern = if rule.exact_paths {

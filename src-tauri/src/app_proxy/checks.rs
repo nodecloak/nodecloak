@@ -111,6 +111,33 @@ fn custom_exact_path_cannot_overlap_an_enabled_detected_app_family() {
     custom.exact_paths = true;
     assert!(config::compile(&[first, custom], &[proxy()], 51234, &"a".repeat(64), ID).is_err());
 }
+#[cfg(windows)]
+#[test]
+fn windows_short_names_match_the_actual_long_image_path() {
+    use std::os::windows::ffi::OsStrExt;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("Long application directory");
+    std::fs::create_dir(&directory).unwrap();
+    let file = directory.join("Long application name.exe");
+    std::fs::write(&file, b"synthetic").unwrap();
+    let input: Vec<u16> = file.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut short = vec![0u16; 32768];
+    let n = unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetShortPathNameW(
+            input.as_ptr(),
+            short.as_mut_ptr(),
+            short.len() as u32,
+        )
+    } as usize;
+    assert!(n > 0 && n < short.len());
+    let short = String::from_utf16_lossy(&short[..n]);
+    let long = file.canonicalize().unwrap().to_string_lossy().into_owned();
+    assert_eq!(
+        config::exact_pattern(&short),
+        config::exact_pattern(&long),
+        "8.3 paths must match QueryFullProcessImageName's long path"
+    );
+}
 #[test]
 fn app_tun_routes_only_assigned_paths_and_preserves_system_dns_and_browser_relays() {
     let v = config::compile(

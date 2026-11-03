@@ -379,6 +379,7 @@ fn resolve(
         let paths: Vec<_> = paths
             .into_iter()
             .filter(|p| std::path::Path::new(p).is_file())
+            .map(|p| discovery::canonical_executable(&p))
             .collect();
         if paths.is_empty() {
             warnings.push(format!("未找到 {name} 的程序文件，本次不启用该规则"));
