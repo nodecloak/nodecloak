@@ -11,6 +11,7 @@ fs.mkdirSync(output,{recursive:true});
 const corePlatform={'windows-x64':'win32-x64','macos-arm64':'darwin-arm64','macos-x64':'darwin-x64'}[platform];
 const coreNotices=path.join(output,'sing-box');fs.mkdirSync(coreNotices,{recursive:true});
 fs.copyFileSync(path.join(projectRoot,'docs/third-party/sing-box-LICENSE.txt'),path.join(coreNotices,'LICENSE'));
+fs.copyFileSync(path.join(projectRoot,'docs/third-party/GPL-3.0.txt'),path.join(coreNotices,'COPYING'));
 fs.copyFileSync(path.join(projectRoot,'.tools/singbox/source/sing-box-1.14.4-source.tar.gz'),path.join(coreNotices,'sing-box-1.14.4-source.tar.gz'));
 fs.copyFileSync(path.join(projectRoot,'.tools/singbox',corePlatform,'provenance.json'),path.join(coreNotices,'provenance.json'));
 fs.writeFileSync(path.join(coreNotices,'README.txt'),'Unmodified upstream sing-box 1.14.4, separately licensed under GPL-3.0-or-later with its upstream naming condition. Exact upstream source is included. Source: https://github.com/SagerNet/sing-box/tree/v1.14.4\n');
