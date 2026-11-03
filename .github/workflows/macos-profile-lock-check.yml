@@ -35,6 +35,7 @@ jobs:
           workspaces: src-tauri
           cache-on-failure: true
       - run: npm ci
+      - run: node scripts/prepare-singbox.mjs
       - run: npm run build
       - name: Record actual runner and browser versions
         run: |

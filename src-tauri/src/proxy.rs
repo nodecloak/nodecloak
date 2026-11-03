@@ -1,4 +1,8 @@
 mod api;
+pub mod node;
+pub(crate) mod core;
+#[cfg(test)]
+mod node_tests;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -29,6 +33,8 @@ pub struct ProxyConfig {
     pub pre_proxy: Option<LocalProxy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<node::NodeOptions>,
 }
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -75,9 +81,10 @@ impl ProxyConfig {
         }
     }
     pub fn validate(&self) -> Result<(), String> {
-        if !["direct", "system", "http", "https", "socks5"].contains(&self.mode.as_str()) {
+        if !["direct", "system", "http", "https", "socks5", "vless", "vmess"].contains(&self.mode.as_str()) {
             return Err("不支持的代理协议".into());
         }
+        node::validate_config(self)?;
         if let Some(local) = &self.pre_proxy {
             if !self.custom() { return Err("链式代理需要先配置副本代理".into()); }
             local.validate()?;
@@ -117,8 +124,9 @@ impl ProxyConfig {
         Ok(())
     }
     pub fn custom(&self) -> bool {
-        ["http", "https", "socks5"].contains(&self.mode.as_str())
+        ["http", "https", "socks5", "vless", "vmess"].contains(&self.mode.as_str())
     }
+    pub fn has_secret(&self)->bool {self.custom()&&(!self.username.is_empty()||node::is_node(&self.mode))}
 }
 pub struct Upstream {
     pub config: ProxyConfig,
@@ -127,6 +135,7 @@ pub struct Upstream {
 impl Upstream {
     pub fn validate(&self) -> Result<(), String> {
         self.config.validate()?;
+        if node::is_node(&self.config.mode)&&uuid::Uuid::parse_str(&self.password).is_err(){return Err("节点 UUID 无效，请重新导入节点链接".into());}
         if self.password.as_bytes().len() > 255 || self.password.chars().any(char::is_control) {
             return Err("代理密码格式无效或超过 255 字节".into());
         }
@@ -418,7 +427,9 @@ pub struct Relay {
     pub endpoint: Option<ProxyEndpoint>,
     stop: watch::Sender<bool>,
     failure: Arc<Mutex<Option<String>>>,
+    core: Option<Arc<core::Core>>,
 }
+impl Relay { pub fn ready(&self)->bool{self.core.as_ref().is_none_or(|core|core.alive())} }
 impl Drop for Relay {
     fn drop(&mut self) {
         let _ = self.stop.send(true);
@@ -429,6 +440,7 @@ pub async fn start(up: Upstream, port: u16) -> Result<Relay, String> {
     let extracted=up.config.api_url.is_some();
     let up=api::resolve(up).await?;
     let endpoint=extracted.then(||ProxyEndpoint {host:up.config.host.clone(),port:up.config.port});
+    let (up,core)=if node::is_node(&up.config.mode){let (up,core)=core::start(up).await?;(up,Some(core))}else{(up,None)};
     if !up.config.custom() {
         return Err("本地转发需要自定义代理".into());
     }
@@ -444,12 +456,14 @@ pub async fn start(up: Upstream, port: u16) -> Result<Relay, String> {
     let connections = receiver.clone();
     let failure = Arc::new(Mutex::new(None));
     let shared_failure = failure.clone();
+    let relay_core=core.clone();
     tauri::async_runtime::spawn(async move {
+        let core=relay_core;
         let permits = Arc::new(tokio::sync::Semaphore::new(128));
         loop {
             tokio::select! {
                 _=receiver.changed()=>break,
-                incoming=listener.accept()=>{if let Ok((socket,_))=incoming {if let Ok(permit)=permits.clone().try_acquire_owned() {let up=up.clone();let stop=connections.clone();let failure=shared_failure.clone();tauri::async_runtime::spawn(async move{let _permit=permit;let _=serve(socket,up,stop,failure).await;});}}else{break;}}
+                incoming=listener.accept()=>{if let Ok((socket,_))=incoming {if core.as_ref().is_some_and(|core|!core.alive()){if let Ok(mut failure)=shared_failure.lock(){*failure=Some("副本代理内核已退出，请重新启动副本".into());}continue;}if let Ok(permit)=permits.clone().try_acquire_owned() {let up=up.clone();let stop=connections.clone();let failure=shared_failure.clone();tauri::async_runtime::spawn(async move{let _permit=permit;let _=serve(socket,up,stop,failure).await;});}}else{break;}}
             }
         }
     });
@@ -458,6 +472,7 @@ pub async fn start(up: Upstream, port: u16) -> Result<Relay, String> {
         endpoint,
         stop,
         failure,
+        core,
     })
 }
 

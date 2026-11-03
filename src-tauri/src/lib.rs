@@ -17,6 +17,7 @@ mod profile_commands;
 mod profile_diagnostics;
 mod profiles;
 mod proxy;
+pub fn run_proxy_core_stdio()->Result<(),String>{proxy::core::run_stdio()}
 mod regional;
 mod session_restore;
 mod terminal;

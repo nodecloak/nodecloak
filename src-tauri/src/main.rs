@@ -1,6 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 fn main() {
     let args:Vec<String>=std::env::args().collect();
+    if args.len()==2&&args[1]=="--nodecloak-proxy-core" {
+        if nodecloak_lib::run_proxy_core_stdio().is_err(){std::process::exit(1);}
+        return;
+    }
     if nodecloak_lib::firefox_native_host::is_invocation(&args) {
         if let Err(error)=nodecloak_lib::firefox_native_host::run_stdio() {
             eprintln!("{error}");

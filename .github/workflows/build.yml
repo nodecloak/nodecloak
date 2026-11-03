@@ -51,6 +51,8 @@ jobs:
           workspaces: src-tauri
           cache-on-failure: true
       - run: npm ci
+      - name: Prepare pinned per-profile proxy core
+        run: node scripts/prepare-singbox.mjs
       - name: Check version and tag
         run: node scripts/check-release-version.mjs
         env:
@@ -123,6 +125,16 @@ jobs:
       - name: Verify large login snapshots in all installed browsers
         shell: bash
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked installed_browsers_large_session_roundtrip -- --ignored --nocapture --test-threads=1
+      - name: Verify isolated proxy cores with synthetic local nodes
+        env:
+          NODECLOAK_TEST_HEADLESS_BROWSERS: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path src-tauri/Cargo.toml --locked
+          if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"; else export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak"; fi
+          cargo test --manifest-path src-tauri/Cargo.toml --locked proxy::core::checks -- --ignored --nocapture --test-threads=1
+          cargo test --manifest-path src-tauri/Cargo.toml --locked native_node_credentials_copy_edit_sync_and_reset_are_scoped -- --ignored --nocapture --test-threads=1
       - name: Verify saved browser pages after profile restart
         shell: bash
         run: |

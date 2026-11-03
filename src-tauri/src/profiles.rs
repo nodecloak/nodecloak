@@ -494,7 +494,7 @@ pub fn upstream(p: &Profile, active: bool) -> Result<Upstream, String> {
     };
     let mut up=Upstream {
         config: config.clone(),
-        password: if config.custom() && !config.username.is_empty() {
+        password: if config.has_secret() {
             password(&p.id, config)?
         } else {
             String::new()
@@ -513,12 +513,13 @@ pub fn upstream(p: &Profile, active: bool) -> Result<Upstream, String> {
 fn same_proxy_credentials(previous: &ProxyConfig, next: &ProxyConfig) -> bool {
     previous.custom()
         && next.custom()
-        && !next.username.is_empty()
+        && next.has_secret()
         && previous.mode == next.mode
         && previous.host.eq_ignore_ascii_case(&next.host)
         && previous.port == next.port
         && previous.username == next.username
         && previous.api_url == next.api_url
+        && previous.node == next.node
 }
 pub fn draft_upstream(root: &Path, id: Option<&str>, draft: &Draft) -> Result<Upstream, String> {
     if let Some(id) = id {
@@ -530,7 +531,7 @@ pub fn draft_upstream(root: &Path, id: Option<&str>, draft: &Draft) -> Result<Up
     validate(draft)?;
     let old = id.map(|id| get(root, id, false)).transpose()?;
     let password = match &draft.password {
-        _ if !draft.proxy.custom() || draft.proxy.username.is_empty() => String::new(),
+        _ if !draft.proxy.has_secret() => String::new(),
         Some(value) if !value.is_empty() => value.clone(),
         _ if !draft.clear_password => old
             .as_ref()
@@ -714,6 +715,7 @@ fn create_with_id(
         last_region: None,
         received_share: None,
     };
+    if crate::proxy::node::is_node(&p.proxy.mode) {upstream(&p,false)?.validate()?;}
     apply_preferences(root, &p)?;
     p.preferences_dirty = false;
     profiles.push(p.clone());
@@ -759,6 +761,7 @@ pub fn update(root: &Path, id: &str, mut draft: Draft) -> Result<Profile, String
         pending.references.push(reference.clone());
         p.credential_refs.push(reference);
     }
+    if crate::proxy::node::is_node(&proxy.mode) {Upstream{password:password(id,&proxy)?,config:proxy.clone()}.validate()?;}
     p.preferences_dirty = p.preferences_dirty || p.preferences != draft.preferences;
     p.preferences_managed = p.preferences_managed || p.preferences != draft.preferences;
     p.name = draft.name.trim().into();
@@ -1179,7 +1182,7 @@ pub fn views(root: &Path, runtime: &Runtime) -> Result<Vec<ProfileView>, String>
             browser_available: platform::browser_path(&p.browser).is_ok(),
             has_password: p.proxy.credential_ref.is_some(),
             proxy_ready: !p.active_proxy.as_ref().unwrap_or(&p.proxy).custom()
-                || relays.contains_key(&p.id),
+                || relays.get(&p.id).is_some_and(|relay|relay.ready()),
             regional_ready: !crate::regional::manual_needs_control_for(
                 &p.browser,
                 p.active_preferences.as_ref().unwrap_or(&p.preferences),
@@ -2048,6 +2051,36 @@ mod tests {
             Err(keyring::Error::NoEntry)
         ));
     }
+    #[test]
+    #[ignore = "Uses only synthetic profile UUIDs in the OS credential store"]
+    fn native_node_credentials_copy_edit_sync_and_reset_are_scoped() {
+        let root=test_dir();let uuid=uuid::Uuid::new_v4().to_string();
+        let mut input=draft("Synthetic node credential");
+        input.proxy=serde_json::from_value(serde_json::json!({"mode":"vless","host":"node.invalid","port":443,"node":{}})).unwrap();
+        input.password=Some(uuid.clone());
+        let original=create(root.path(),input.clone(),None).unwrap();
+        let _original_cleanup=PendingCredentials{id:original.id.clone(),references:original.credential_refs.clone(),committed:false};
+        assert_eq!(upstream(&original,false).unwrap().password,uuid);
+        let doc=crate::cloud::model::Document::export(&original).unwrap();assert_eq!(doc.schema,6);
+        assert_eq!(crate::cloud::model::Document::parse(serde_json::to_value(doc).unwrap()).unwrap().draft().password.as_deref(),Some(uuid.as_str()));
+        input.password=None;
+        let copied=create(root.path(),input.clone(),Some(&original.id)).unwrap();
+        let _copied_cleanup=PendingCredentials{id:copied.id.clone(),references:copied.credential_refs.clone(),committed:false};
+        assert_ne!(copied.proxy.credential_ref,original.proxy.credential_ref);assert_eq!(upstream(&copied,false).unwrap().password,uuid);
+        input.proxy.pre_proxy=Some(crate::proxy::LocalProxy{mode:"http".into(),host:"192.168.10.1".into(),port:7890});
+        assert_eq!(draft_upstream(root.path(),Some(&original.id),&input).unwrap().password,uuid);
+        let changed=update(root.path(),&original.id,input.clone()).unwrap();assert_eq!(changed.proxy.credential_ref,original.proxy.credential_ref);
+        assert!(!std::fs::read_to_string(root.path().join("profiles.json")).unwrap().contains(&uuid));
+        reset::reset(root.path(),&original.id,false,&Runtime::default()).unwrap();
+        assert_eq!(upstream(&get(root.path(),&original.id,false).unwrap(),false).unwrap().password,uuid);
+        reset::reset(root.path(),&original.id,true,&Runtime::default()).unwrap();assert_eq!(get(root.path(),&original.id,false).unwrap().proxy,ProxyConfig::system());
+    }
+    #[test]
+    fn new_node_without_uuid_is_not_saved() {
+        let root=test_dir();let before=load(root.path()).unwrap().len();let mut input=draft("Missing node credential");
+        input.proxy=serde_json::from_value(serde_json::json!({"mode":"vless","host":"node.invalid","port":443,"node":{}})).unwrap();
+        assert!(create(root.path(),input,None).is_err());assert_eq!(load(root.path()).unwrap().len(),before);
+    }
     fn draft(name: &str) -> Draft {
         Draft {
             name: name.into(),
@@ -2189,6 +2222,7 @@ mod tests {
             credential_ref: None,
             pre_proxy: None,
             api_url: None,
+            node: None,
         };
         let mut original = create(root.path(), initial.clone(), None).unwrap();
         // A missing secret must never be read when the destination changes.
@@ -2242,6 +2276,7 @@ mod tests {
             credential_ref: None,
             pre_proxy: None,
             api_url: None,
+            node: None,
         };
         original_draft.password = Some("synthetic-original-secret".into());
         let original = create(root.path(), original_draft.clone(), None).unwrap();
@@ -2332,6 +2367,7 @@ mod tests {
             credential_ref: Some(identifier()),
             pre_proxy: None,
             api_url: None,
+            node: None,
         };
         let bytes = serde_json::to_string(&config).unwrap();
         assert!(!bytes.contains("password"));

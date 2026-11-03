@@ -11,3 +11,10 @@
 
 .proxy-source-form .proxy-api-url{grid-column:1 / -1}
 .proxy-source-form .proxy-api-url input{width:100%;min-width:0}
+.proxy-node-label{display:grid;gap:8px;margin:14px 0 8px;color:var(--text-secondary)}
+.proxy-node-summary{margin-top:16px;padding:18px}
+.proxy-node-summary>strong{display:flex;align-items:center;gap:8px;overflow-wrap:anywhere}
+.proxy-node-summary dl{display:flex;flex-wrap:wrap;gap:14px 28px;margin:14px 0 0}
+.proxy-node-summary dl>div{display:grid;gap:4px}
+.proxy-node-summary dt{font-size:12px;opacity:.65}
+.proxy-node-summary dd{margin:0;overflow-wrap:anywhere}

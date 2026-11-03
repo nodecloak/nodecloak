@@ -3,9 +3,10 @@ import {native} from './bridge';
 import type {BrowserId,Check} from './domain';
 import type {SharedProfileGrant} from './profile-sharing';
 import {fingerprintDefaults,fingerprintNeedsInjection,type FingerprintSettings} from './profile-fingerprint';
-export type ProxyMode='direct'|'system'|'http'|'https'|'socks5';
+import {isNodeMode,parseNodeUri,validNode,type NodeOptions} from './proxy-node';
+export type ProxyMode='direct'|'system'|'http'|'https'|'socks5'|'vless'|'vmess';
 export interface LocalProxy {mode:'http'|'https'|'socks5';host:string;port:number}
-export interface ProxyConfig {mode:ProxyMode;host:string;port:number;username:string;credentialRef?:string|null;preProxy?:LocalProxy|null;apiUrl?:string|null}
+export interface ProxyConfig {mode:ProxyMode;host:string;port:number;username:string;credentialRef?:string|null;preProxy?:LocalProxy|null;apiUrl?:string|null;node?:NodeOptions|null}
 export type PermissionMode='ask'|'block';
 export interface RegionalSettings {enabled:boolean;languageMode:'ip'|'custom';timezoneMode:'system'|'ip'|'custom';timezone:string;locationMode:'system'|'ip'|'custom';latitude:number;longitude:number;accuracy:number}
 export interface IpRegion {ip:string;country:string;city:string;language:string;timezone:string;latitude:number;longitude:number;checkedAt:string}
@@ -27,6 +28,7 @@ export interface BrowserProfile {id:string;name:string;browser:BrowserId;notes:s
 export interface ProfileDraft {name:string;browser:BrowserId;notes:string;tags:string[];proxy:ProxyConfig;password?:string;clearPassword:boolean;preferences:Preferences}
 export const defaults=():ProfileDraft=>({name:'',browser:'firefox',notes:'',tags:[],proxy:{mode:'system',host:'',port:8080,username:''},password:'',clearPassword:false,preferences:{language:'en-US,en',privacy:true,fontRestriction:false,startupUrl:'https://ip.nodecloak.com/',advanced:advancedDefaults(),regional:regionalDefaults(),fingerprint:fingerprintDefaults()}});
 export function parseProxyUri(input:string,fallbackMode:ProxyMode='http'):{proxy:ProxyConfig;password:string} {
+  if(/^(vless|vmess):\/\//.test(input.trim()))return parseNodeUri(input);
   const value=input.trim(),invalid=()=>new Error('代理链接协议或格式无效');
   if(!value||value.length>8192||/[\x00-\x1f\x7f]/.test(value))throw invalid();
   let mode:ProxyMode,host:string,port:number,username:string,password:string;
@@ -77,7 +79,7 @@ export function validateDraft(draft:ProfileDraft):string|null {
   try {if(draft.preferences.startupUrl!=='about:blank'){const url=new URL(draft.preferences.startupUrl);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)return '启动页面只支持 HTTP、HTTPS 或 about:blank';}}catch{return '请填写完整的启动页面地址';}
   const local=draft.proxy.preProxy;
   if(local){
-    if(!['http','https','socks5'].includes(draft.proxy.mode))return '链式代理需要先配置副本代理';
+    if(!['http','https','socks5','vless','vmess'].includes(draft.proxy.mode))return '链式代理需要先配置副本代理';
     if(!['http','https','socks5'].includes(local.mode))return '前置代理协议应为 HTTP、HTTPS 或 SOCKS5';
     let hostValid=local.host.length>0&&local.host.length<=253&&!/[\s\x00-\x1f\x7f/\\@?#\[\]]/.test(local.host);
     if(local.host.includes(':')){try{new URL(`http://[${local.host}]/`);}catch{hostValid=false;}}
@@ -85,6 +87,11 @@ export function validateDraft(draft:ProfileDraft):string|null {
     if(!hostValid||!Number.isInteger(local.port)||local.port<1||local.port>65535)return '前置代理请填写有效的 IP 或域名及端口，不要包含协议或路径';
   }
   const apiUrl=draft.proxy.apiUrl;
+  if(isNodeMode(draft.proxy.mode)){
+    if(!draft.proxy.node||!validNode(draft.proxy.node,draft.proxy.mode)||apiUrl!=null||draft.proxy.username)return '节点参数不支持或格式无效，请检查 TLS 和传输设置';
+    if(!draft.proxy.host||!Number.isInteger(draft.proxy.port)||draft.proxy.port<1||draft.proxy.port>65535)return '请先导入节点链接';
+    if(draft.password&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(draft.password))return '节点 UUID 无效，请重新导入节点链接';
+  }else if(draft.proxy.node)return '普通代理不能附带节点参数';
   if(apiUrl!=null){
     if(!['http','https','socks5'].includes(draft.proxy.mode))return 'API 提取需要先选择代理协议';
     if(!apiUrl||apiUrl.length>4096||/\s|[\x00-\x1f\x7f]/.test(apiUrl))return '请填写有效的代理 API 地址';

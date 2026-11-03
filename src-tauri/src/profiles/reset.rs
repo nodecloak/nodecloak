@@ -223,6 +223,7 @@ mod tests {
                     port: 7890,
                 }),
                 api_url: Some("https://api.example.invalid/proxy".into()),
+                node: None,
                 credential_ref: None,
             },
             password: None,

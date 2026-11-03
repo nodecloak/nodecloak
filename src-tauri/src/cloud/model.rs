@@ -17,6 +17,8 @@ pub struct PortableProxy {
     pub pre_proxy: Option<crate::proxy::LocalProxy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<crate::proxy::node::NodeOptions>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -50,7 +52,9 @@ impl Document {
             || advanced.web_rtc != profiles::WebRtcPolicy::Inherit
             || (advanced.block_webgl && p.browser != "firefox");
         Ok(Self {
-            schema: if p.proxy.api_url.is_some() {
+            schema: if p.proxy.node.is_some() {
+                6
+            } else if p.proxy.api_url.is_some() {
                 5
             } else if p.proxy.pre_proxy.is_some() {
                 4
@@ -73,6 +77,7 @@ impl Document {
                 password: upstream.password.clone(),
                 pre_proxy: p.proxy.pre_proxy.clone(),
                 api_url: p.proxy.api_url.clone(),
+                node: p.proxy.node.clone(),
             },
             preferences: prefs,
             deleted: p.deleted_at.is_some(),
@@ -92,6 +97,7 @@ impl Document {
                 credential_ref: None,
                 pre_proxy: self.proxy.pre_proxy.clone(),
                 api_url: self.proxy.api_url.clone(),
+                node: self.proxy.node.clone(),
             },
             password: Some(self.proxy.password.clone()),
             clear_password: self.proxy.password.is_empty(),
@@ -100,9 +106,10 @@ impl Document {
     }
     pub fn parse(v: Value) -> Result<Self, String> {
         let mut doc: Self = serde_json::from_value(v).map_err(|_| "云端副本格式无效")?;
-        if ![1, 2, 3, 4, 5].contains(&doc.schema) {
+        if ![1, 2, 3, 4, 5, 6].contains(&doc.schema) {
             return Err("不支持的云端副本版本".into());
         };
+        if doc.schema < 6 && (doc.proxy.node.is_some() || crate::proxy::node::is_node(&doc.proxy.mode)) {return Err("节点代理需要新版副本配置".into());}
         if doc.schema < 5 && doc.proxy.api_url.is_some() {
             return Err("API 代理需要新版副本配置".into());
         }
@@ -114,6 +121,7 @@ impl Document {
         }
         crate::regional::normalize_sources(&mut doc.preferences);
         profiles::validate(&doc.draft())?;
+        if crate::proxy::node::is_node(&doc.proxy.mode) {crate::proxy::Upstream{config:doc.draft().proxy,password:doc.proxy.password.clone()}.validate()?;}
         Ok(doc)
     }
 }
