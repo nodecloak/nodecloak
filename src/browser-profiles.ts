@@ -27,6 +27,10 @@ export interface ProxyTest {ip:string|null;country:string|null;latency:number;ch
 export interface BrowserProfile {id:string;name:string;browser:BrowserId;notes:string;tags:string[];proxy:ProxyConfig;preferences:Preferences;createdAt:string;updatedAt:string;deletedAt:string|null;lastTest:ProxyTest|null;legacy:boolean;running:boolean;pendingRestart:boolean;browserAvailable:boolean;hasPassword:boolean;proxyReady:boolean;activeProxyEndpoint?:{host:string;port:number}|null;lastRegion?:ResolvedRegion|null;regionalReady?:boolean;regionalError?:string|null;sharing?:SharedProfileGrant|null}
 export interface ProfileDraft {name:string;browser:BrowserId;notes:string;tags:string[];proxy:ProxyConfig;password?:string;clearPassword:boolean;preferences:Preferences}
 export const defaults=():ProfileDraft=>({name:'',browser:'firefox',notes:'',tags:[],proxy:{mode:'system',host:'',port:8080,username:''},password:'',clearPassword:false,preferences:{language:'en-US,en',privacy:true,fontRestriction:false,startupUrl:'https://ip.nodecloak.com/',advanced:advancedDefaults(),regional:regionalDefaults(),fingerprint:fingerprintDefaults()}});
+export function selectProxyMode(draft:ProfileDraft,mode:ProxyMode):ProfileDraft {
+ const clear=draft.proxy.mode!==mode&&(isNodeMode(draft.proxy.mode)||isNodeMode(mode));
+ return {...draft,password:clear?'':draft.password,clearPassword:clear?false:draft.clearPassword,proxy:{...draft.proxy,mode,username:clear?'':draft.proxy.username,node:isNodeMode(mode)?(mode===draft.proxy.mode?draft.proxy.node:undefined):undefined,preProxy:['http','https','socks5','vless','vmess'].includes(mode)?draft.proxy.preProxy:undefined,apiUrl:['http','https','socks5'].includes(mode)?draft.proxy.apiUrl:undefined}};
+}
 export function parseProxyUri(input:string,fallbackMode:ProxyMode='http'):{proxy:ProxyConfig;password:string} {
   if(/^(vless|vmess):\/\//.test(input.trim()))return parseNodeUri(input);
   const value=input.trim(),invalid=()=>new Error('代理链接协议或格式无效');

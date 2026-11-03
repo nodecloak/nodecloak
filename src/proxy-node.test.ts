@@ -1,5 +1,5 @@
 import {expect,it} from 'vitest';
-import {parseProxyUri,defaults,validateDraft} from './browser-profiles';
+import {parseProxyUri,defaults,validateDraft,selectProxyMode} from './browser-profiles';
 const uuid='11111111-1111-4111-8111-111111111111';
 it('imports VLESS Reality and VMess WS without storing raw links or UUID in config',()=>{
  const vless=parseProxyUri(`vless://${uuid}@node.example:443?security=reality&sni=edge.example&pbk=${'A'.repeat(43)}&sid=01&fp=chrome&flow=xtls-rprx-vision&type=tcp#JP`);
@@ -17,4 +17,14 @@ it('rejects unsupported or ambiguous links instead of silently weakening them',(
   expect(error).toBeTruthy();expect(String(error)).not.toContain(uuid);expect(String(error)).not.toContain(uri);
  }
  expect(()=>parseProxyUri('vmess://'+btoa(JSON.stringify({v:'2',add:'node.example',port:'443',id:uuid,net:'grpc',host:'custom-authority.example',path:'service',tls:'tls'})))).toThrow();
+});
+
+it('clears transient node credentials when switching protocol families',()=>{
+ const node={...defaults(),...parseProxyUri(`vless://${uuid}@node.example:443`)};
+ expect(selectProxyMode(node,'http').password).toBe('');
+ expect(selectProxyMode(node,'vless').password).toBe(uuid);
+ const ordinary={...defaults(),password:'ordinary-secret',proxy:{mode:'http' as const,host:'proxy.example',port:8080,username:'user'}};
+ expect(selectProxyMode(ordinary,'vmess').password).toBe('');
+ expect(selectProxyMode(ordinary,'vmess').proxy.username).toBe('');
+ expect(selectProxyMode(ordinary,'https').password).toBe('ordinary-secret');
 });
