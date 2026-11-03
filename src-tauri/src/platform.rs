@@ -643,6 +643,16 @@ mod profile_tests {
         assert!(result.is_ok(), "shutdown cleanup must finish within the normal close deadline: {result:?}");
         assert!(ensure_profile_closed(dir.path()).is_ok());
     }
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn forced_close_waits_for_auxiliary_profile_lock_release() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir=tempfile::tempdir().unwrap();
+        let lock=std::fs::OpenOptions::new().create(true).write(true).truncate(true).share_mode(0).open(dir.path().join("parent.lock")).unwrap();
+        let release=std::thread::spawn(move||{std::thread::sleep(std::time::Duration::from_secs(2));drop(lock);});
+        let result=force_close_profile(dir.path());release.join().unwrap();
+        assert!(result.is_ok(),"force-close reported failure before auxiliary shutdown finished: {result:?}");
+    }
     #[test]
     fn utc_offset_is_verified_even_when_timezone_name_matches() {
         assert!(verify_timezone_values("utc", &target_timezone("utc").unwrap(), 0).is_ok());
@@ -980,8 +990,18 @@ fn spawn_browser_impl(
         .stderr(if manual_endpoint.is_some() { Stdio::piped() } else { Stdio::null() })
         .spawn()
         .map_err(|e| format!("无法打开浏览器：{e}"))?;
+    let stderr=child.stderr.take();
+    let launcher_exit=std::sync::Arc::new(std::sync::Mutex::new(None));
+    let observed_exit=launcher_exit.clone();
+    // Retain and reap only the child we launched. Dropping std::process::Child
+    // does not reap Unix children; a zombie can keep a profile appearing live.
+    // Reap independently of stderr, which descendant helpers may keep open.
+    std::thread::spawn(move||{
+        let status=child.wait().ok().and_then(|status|status.code());
+        if let Ok(mut observed)=observed_exit.lock(){*observed=status;}
+    });
     if let Some(port) = manual_endpoint {
-        let stderr = child.stderr.take().ok_or("无法读取浏览器配置接口")?;
+        let stderr = stderr.ok_or("无法读取浏览器配置接口")?;
         let marker = profile.join("DevToolsActivePort");
         let profile = profile.to_path_buf();
         let browser = browser.to_owned();
@@ -1009,7 +1029,7 @@ fn spawn_browser_impl(
                     }
                 }
                 Ok(None) => {
-                    let status = child.try_wait().ok().flatten().and_then(|status|status.code());
+                    let status = launcher_exit.lock().ok().and_then(|status|*status);
                     crate::browser_control::log_startup_endpoint(&profile,&browser,"endpoint_missing",&format!("child stderr ended without a valid endpoint; launcher_exit={status:?}"));
                 }
                 Err(error) => crate::browser_control::log_startup_endpoint(&profile,&browser,"endpoint_read_failed",&format!("browser stderr read failed; kind={:?}, os_code={:?}",error.kind(),error.raw_os_error())),
@@ -1199,7 +1219,9 @@ pub fn force_close_profile(profile: &Path) -> Result<(), String> {
             }
         }
     }
-    ensure_profile_closed(profile)
+    // TERM/KILL and taskkill completion are not a guarantee that browser
+    // helpers and profile locks have already finished releasing resources.
+    wait_profile_closed(profile,std::time::Duration::from_secs(8))
 }
 pub(crate) fn prepare_firefox_profile(profile: &Path) -> Result<PathBuf, String> {
     let failure = |error: std::io::Error| {

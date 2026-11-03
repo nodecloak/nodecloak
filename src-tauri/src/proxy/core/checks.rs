@@ -298,13 +298,31 @@ fn installed_core_isolated_nodes_first_hop_shutdown_and_fail_closed() {
         let origin_hits = hits.clone();
         let paths = Arc::new(Mutex::new(std::collections::HashSet::<String>::new()));
         let requests = paths.clone();
+        let observations=Arc::new(Mutex::new(std::collections::BTreeMap::<&'static str,usize>::new()));
+        let traffic=observations.clone();
         let target = tokio::spawn(async move {
             loop {
                 let (mut stream, _) = origin.accept().await.unwrap();
                 let hits = origin_hits.clone();
                 let requests = requests.clone();
+                let traffic=traffic.clone();
                 tokio::spawn(async move {
-                    let bytes = header(&mut stream).await.unwrap();
+                    *traffic.lock().unwrap().entry("accepted").or_default()+=1;
+                    // A plaintext HTTP fixture must reject a TLS probe or idle
+                    // preconnect promptly, not wait forever for CRLFCRLF.
+                    let first=match tokio::time::timeout(Duration::from_secs(5),stream.read_u8()).await{
+                        Ok(Ok(first))=>first,
+                        _=>{*traffic.lock().unwrap().entry("idle_or_closed").or_default()+=1;return;}
+                    };
+                    if !first.is_ascii_uppercase(){
+                        *traffic.lock().unwrap().entry(if first==0x16{"tls_probe"}else{"non_http"}).or_default()+=1;
+                        let _=stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;return;
+                    }
+                    let rest=match tokio::time::timeout(Duration::from_secs(5),header(&mut stream)).await{
+                        Ok(Ok(bytes))=>bytes,
+                        _=>{*traffic.lock().unwrap().entry("incomplete_header").or_default()+=1;return;}
+                    };
+                    let mut bytes=vec![first];bytes.extend(rest);
                     let request = String::from_utf8_lossy(&bytes);
                     if let Some(path) = request.split_whitespace().nth(1) {
                         requests.lock().unwrap().insert(path.to_owned());
@@ -432,7 +450,10 @@ fn installed_core_isolated_nodes_first_hop_shutdown_and_fail_closed() {
                 while !paths.lock().unwrap().contains(&path) && Instant::now() < deadline {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                assert!(paths.lock().unwrap().contains(&path),"{browser} did not use {mode}/{first_mode} to reach an unresolvable fixture hostname");
+                if !paths.lock().unwrap().contains(&path){
+                    let pids=crate::platform::profile_process_ids(&profile).unwrap_or_default();
+                    panic!("{browser} did not use {mode}/{first_mode}: profile_pids={pids:?}, proxy_ready={}, first_hop_connects={}, origin={:?}, observed_paths={:?}, relay_error={:?}",relay.ready(),connects.load(std::sync::atomic::Ordering::SeqCst),observations.lock().unwrap(),paths.lock().unwrap(),relay.failure.lock().unwrap());
+                }
                 crate::platform::force_close_profile(&profile).unwrap();
                 crate::platform::wait_profile_closed(&profile, Duration::from_secs(10)).unwrap();
                 assert!(connects.load(std::sync::atomic::Ordering::SeqCst) > 1);
