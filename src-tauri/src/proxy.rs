@@ -81,7 +81,7 @@ impl ProxyConfig {
         }
     }
     pub fn validate(&self) -> Result<(), String> {
-        if !["direct", "system", "http", "https", "socks5", "vless", "vmess"].contains(&self.mode.as_str()) {
+        if !["direct", "system", "http", "https", "socks5", "vless", "vmess", "hysteria2"].contains(&self.mode.as_str()) {
             return Err("不支持的代理协议".into());
         }
         node::validate_config(self)?;
@@ -124,7 +124,7 @@ impl ProxyConfig {
         Ok(())
     }
     pub fn custom(&self) -> bool {
-        ["http", "https", "socks5", "vless", "vmess"].contains(&self.mode.as_str())
+        ["http", "https", "socks5", "vless", "vmess", "hysteria2"].contains(&self.mode.as_str())
     }
     pub fn has_secret(&self)->bool {self.custom()&&(!self.username.is_empty()||node::is_node(&self.mode))}
 }
@@ -135,7 +135,8 @@ pub struct Upstream {
 impl Upstream {
     pub fn validate(&self) -> Result<(), String> {
         self.config.validate()?;
-        if node::is_node(&self.config.mode)&&uuid::Uuid::parse_str(&self.password).is_err(){return Err("节点 UUID 无效，请重新导入节点链接".into());}
+        if self.config.mode == "hysteria2" && self.password.is_empty() { return Err("节点认证信息为空，请重新导入节点链接".into()); }
+        if matches!(self.config.mode.as_str(),"vless"|"vmess")&&uuid::Uuid::parse_str(&self.password).is_err(){return Err("节点 UUID 无效，请重新导入节点链接".into());}
         if self.password.as_bytes().len() > 255 || self.password.chars().any(char::is_control) {
             return Err("代理密码格式无效或超过 255 字节".into());
         }

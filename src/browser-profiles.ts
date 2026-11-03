@@ -4,7 +4,7 @@ import type {BrowserId,Check} from './domain';
 import type {SharedProfileGrant} from './profile-sharing';
 import {fingerprintDefaults,fingerprintNeedsInjection,type FingerprintSettings} from './profile-fingerprint';
 import {isNodeMode,parseNodeUri,validNode,type NodeOptions} from './proxy-node';
-export type ProxyMode='direct'|'system'|'http'|'https'|'socks5'|'vless'|'vmess';
+export type ProxyMode='direct'|'system'|'http'|'https'|'socks5'|'vless'|'vmess'|'hysteria2';
 export interface LocalProxy {mode:'http'|'https'|'socks5';host:string;port:number}
 export interface ProxyConfig {mode:ProxyMode;host:string;port:number;username:string;credentialRef?:string|null;preProxy?:LocalProxy|null;apiUrl?:string|null;node?:NodeOptions|null}
 export type PermissionMode='ask'|'block';
@@ -29,10 +29,10 @@ export interface ProfileDraft {name:string;browser:BrowserId;notes:string;tags:s
 export const defaults=():ProfileDraft=>({name:'',browser:'firefox',notes:'',tags:[],proxy:{mode:'system',host:'',port:8080,username:''},password:'',clearPassword:false,preferences:{language:'en-US,en',privacy:true,fontRestriction:false,startupUrl:'https://ip.nodecloak.com/',advanced:advancedDefaults(),regional:regionalDefaults(),fingerprint:fingerprintDefaults()}});
 export function selectProxyMode(draft:ProfileDraft,mode:ProxyMode):ProfileDraft {
  const clear=draft.proxy.mode!==mode&&(isNodeMode(draft.proxy.mode)||isNodeMode(mode));
- return {...draft,password:clear?'':draft.password,clearPassword:clear?false:draft.clearPassword,proxy:{...draft.proxy,mode,username:clear?'':draft.proxy.username,node:isNodeMode(mode)?(mode===draft.proxy.mode?draft.proxy.node:undefined):undefined,preProxy:['http','https','socks5','vless','vmess'].includes(mode)?draft.proxy.preProxy:undefined,apiUrl:['http','https','socks5'].includes(mode)?draft.proxy.apiUrl:undefined}};
+ return {...draft,password:clear?'':draft.password,clearPassword:clear?false:draft.clearPassword,proxy:{...draft.proxy,mode,username:clear?'':draft.proxy.username,node:isNodeMode(mode)?(mode===draft.proxy.mode?draft.proxy.node:undefined):undefined,preProxy:['http','https','socks5','vless','vmess','hysteria2'].includes(mode)?draft.proxy.preProxy:undefined,apiUrl:['http','https','socks5'].includes(mode)?draft.proxy.apiUrl:undefined}};
 }
 export function parseProxyUri(input:string,fallbackMode:ProxyMode='http'):{proxy:ProxyConfig;password:string} {
-  if(/^(vless|vmess):\/\//.test(input.trim()))return parseNodeUri(input);
+  if(/^(vless|vmess|hysteria2|hy2):\/\//.test(input.trim()))return parseNodeUri(input);
   const value=input.trim(),invalid=()=>new Error('代理链接协议或格式无效');
   if(!value||value.length>8192||/[\x00-\x1f\x7f]/.test(value))throw invalid();
   let mode:ProxyMode,host:string,port:number,username:string,password:string;
@@ -83,7 +83,8 @@ export function validateDraft(draft:ProfileDraft):string|null {
   try {if(draft.preferences.startupUrl!=='about:blank'){const url=new URL(draft.preferences.startupUrl);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)return '启动页面只支持 HTTP、HTTPS 或 about:blank';}}catch{return '请填写完整的启动页面地址';}
   const local=draft.proxy.preProxy;
   if(local){
-    if(!['http','https','socks5','vless','vmess'].includes(draft.proxy.mode))return '链式代理需要先配置副本代理';
+    if(!['http','https','socks5','vless','vmess','hysteria2'].includes(draft.proxy.mode))return '链式代理需要先配置副本代理';
+    if(draft.proxy.mode==='hysteria2'&&local.mode!=='socks5')return 'Hysteria2 需要支持 UDP 的 SOCKS5 前置代理';
     if(!['http','https','socks5'].includes(local.mode))return '前置代理协议应为 HTTP、HTTPS 或 SOCKS5';
     let hostValid=local.host.length>0&&local.host.length<=253&&!/[\s\x00-\x1f\x7f/\\@?#\[\]]/.test(local.host);
     if(local.host.includes(':')){try{new URL(`http://[${local.host}]/`);}catch{hostValid=false;}}
@@ -94,7 +95,7 @@ export function validateDraft(draft:ProfileDraft):string|null {
   if(isNodeMode(draft.proxy.mode)){
     if(!draft.proxy.node||!validNode(draft.proxy.node,draft.proxy.mode)||apiUrl!=null||draft.proxy.username)return '节点参数不支持或格式无效，请检查 TLS 和传输设置';
     if(!draft.proxy.host||!Number.isInteger(draft.proxy.port)||draft.proxy.port<1||draft.proxy.port>65535)return '请先导入节点链接';
-    if(draft.password&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(draft.password))return '节点 UUID 无效，请重新导入节点链接';
+    if(draft.proxy.mode!=='hysteria2'&&draft.password&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(draft.password))return '节点 UUID 无效，请重新导入节点链接';
   }else if(draft.proxy.node)return '普通代理不能附带节点参数';
   if(apiUrl!=null){
     if(!['http','https','socks5'].includes(draft.proxy.mode))return 'API 提取需要先选择代理协议';

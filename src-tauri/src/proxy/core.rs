@@ -511,6 +511,7 @@ fn validate_helper_config(config: &Value) -> Result<(), String> {
         }
         .into();
         options.server_name = text(&tls["server_name"]);
+        options.insecure = tls["insecure"].as_bool().unwrap_or(false);
         options.fingerprint = text(&tls["utls"]["fingerprint"]);
         options.public_key = text(&tls["reality"]["public_key"]);
         options.short_id = text(&tls["reality"]["short_id"]);
@@ -566,7 +567,7 @@ fn validate_helper_config(config: &Value) -> Result<(), String> {
             pre_proxy: first,
             ..Default::default()
         },
-        password: text(&outbound["uuid"]),
+        password: text(&outbound[if outbound["type"] == "hysteria2" {"password"} else {"uuid"}]),
     };
     let inbound = &config["inbounds"][0];
     let user = text(&inbound["users"][0]["username"]);

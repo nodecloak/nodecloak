@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct NodeOptions {
     pub tls: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub insecure: bool,
     pub server_name: String,
     pub fingerprint: String,
     pub public_key: String,
@@ -24,6 +26,7 @@ impl Default for NodeOptions {
     fn default() -> Self {
         Self {
             tls: "none".into(),
+            insecure: false,
             server_name: String::new(),
             fingerprint: String::new(),
             public_key: String::new(),
@@ -42,7 +45,7 @@ impl Default for NodeOptions {
 impl NodeOptions {
     pub fn validate(&self, mode: &str) -> Result<(), String> {
         let bad = || "节点参数不支持或格式无效，请检查 TLS 和传输设置".to_owned();
-        if !["vless", "vmess"].contains(&mode)
+        if !["vless", "vmess", "hysteria2"].contains(&mode)
             || !["none", "tls", "reality"].contains(&self.tls.as_str())
             || !["tcp", "ws", "httpupgrade", "grpc"].contains(&self.transport.as_str())
         {
@@ -135,6 +138,12 @@ impl NodeOptions {
         if mode == "vless" && (self.alter_id != 0 || self.security != "auto") {
             return Err(bad());
         }
+        if (self.insecure && mode != "hysteria2")
+            || (mode == "hysteria2" && (self.tls != "tls" || self.transport != "tcp"
+                || !self.fingerprint.is_empty() || !self.flow.is_empty()
+                || self.alter_id != 0 || self.security != "auto")) {
+            return Err(bad());
+        }
         if self.transport == "tcp"
             && (!self.path.is_empty() || !self.host.is_empty() || !self.service_name.is_empty())
         {
@@ -149,11 +158,16 @@ impl NodeOptions {
         Ok(())
     }
 }
+fn is_false(value: &bool) -> bool { !*value }
 pub fn outbound(up: &Upstream) -> Result<Value, String> {
     up.validate()?;
     let p = &up.config;
     let options = p.node.as_ref().ok_or("请先导入节点链接")?;
     let mut out = json!({"type":p.mode,"tag":"node","server":p.host,"server_port":p.port,"uuid":up.password,"network":"tcp"});
+    if p.mode == "hysteria2" {
+        out.as_object_mut().unwrap().remove("uuid");
+        out["password"] = json!(up.password);
+    }
     if p.mode == "vmess" {
         out["security"] = json!(options.security);
         out["alter_id"] = json!(options.alter_id);
@@ -163,6 +177,7 @@ pub fn outbound(up: &Upstream) -> Result<Value, String> {
     }
     if options.tls != "none" {
         let mut tls = json!({"enabled":true});
+        if options.insecure { tls["insecure"] = json!(true); }
         if !options.server_name.is_empty() {
             tls["server_name"] = json!(options.server_name);
         }
@@ -220,10 +235,13 @@ pub fn config(up: &Upstream, port: u16, username: &str, password: &str) -> Resul
     )
 }
 pub fn is_node(mode: &str) -> bool {
-    matches!(mode, "vless" | "vmess")
+    matches!(mode, "vless" | "vmess" | "hysteria2")
 }
 pub fn validate_config(p: &ProxyConfig) -> Result<(), String> {
     if is_node(&p.mode) {
+        if p.mode == "hysteria2" && p.pre_proxy.as_ref().is_some_and(|first| first.mode != "socks5") {
+            return Err("Hysteria2 需要支持 UDP 的 SOCKS5 前置代理".into());
+        }
         if p.api_url.is_some() || !p.username.is_empty() {
             return Err("节点代理不支持 API 提取或代理用户名".into());
         }

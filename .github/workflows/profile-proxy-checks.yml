@@ -50,7 +50,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"; else export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak"; fi
+          core_platform=$(node -p "process.platform+'-'+process.arch")
+          if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_SINGBOX="$GITHUB_WORKSPACE/.tools/singbox/$core_platform/sing-box.exe"; else export NODECLOAK_TEST_SINGBOX="$GITHUB_WORKSPACE/.tools/singbox/$core_platform/sing-box"; fi
           cargo test --manifest-path src-tauri/Cargo.toml --locked installed_node_transports_reach_only_local_fixture -- --ignored --nocapture --test-threads=1
+          cargo test --manifest-path src-tauri/Cargo.toml --locked installed_hysteria2_transfers_direct_and_udp_chain_and_rejects_bad_auth_tls -- --ignored --nocapture --test-threads=1
       - name: Install disposable-browser test dependencies on macOS
         if: runner.os == 'macOS'
         shell: bash
@@ -70,6 +73,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"; else export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak"; fi
+          core_platform=$(node -p "process.platform+'-'+process.arch")
+          if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_SINGBOX="$GITHUB_WORKSPACE/.tools/singbox/$core_platform/sing-box.exe"; else export NODECLOAK_TEST_SINGBOX="$GITHUB_WORKSPACE/.tools/singbox/$core_platform/sing-box"; fi
           cargo test --manifest-path src-tauri/Cargo.toml --locked installed_core_isolated_nodes_first_hop_shutdown_and_fail_closed -- --ignored --nocapture --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml --locked occupied_port_cannot_impersonate_owned_core -- --ignored --nocapture --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml --locked native_node_credentials_copy_edit_sync_and_reset_are_scoped -- --ignored --nocapture --test-threads=1

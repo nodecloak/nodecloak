@@ -1653,5 +1653,13 @@
   "节点代理不支持 API 提取或代理用户名": "Node proxies cannot use API extraction or a proxy username",
   "副本代理内核未就绪；请重新导入节点或重启副本": "The profile proxy core is not ready. Import the node again or restart the profile.",
   "副本代理内核已退出，请重新启动副本": "The profile proxy core has exited. Restart the profile.",
-  "已安全保存；留空保留原 UUID": "Saved securely; leave blank to keep the UUID"
+  "已安全保存；留空保留原 UUID": "Saved securely; leave blank to keep the UUID",
+  "节点认证信息": "Node authentication",
+  "节点认证信息为空，请重新导入节点链接": "Node authentication is empty. Import the node link again.",
+  "请粘贴 VLESS、VMess 或 Hysteria2 节点链接": "Paste a VLESS, VMess or Hysteria2 node link",
+  "跳过证书验证": "Certificate verification disabled",
+  "已安全保存；留空保留原认证信息": "Securely saved; leave blank to keep existing authentication",
+  "仅用于此浏览器副本，不修改系统代理或系统 DNS。节点认证信息保存在系统凭据存储。": "Applies only to this browser profile. System proxy and DNS settings are unchanged. Node authentication is kept in the system credential store.",
+  "Hysteria2 使用 UDP；链式连接需要前置 SOCKS5 支持 UDP 转发。": "Hysteria2 uses UDP. Chained connections require a SOCKS5 first hop with UDP forwarding.",
+  "Hysteria2 需要支持 UDP 的 SOCKS5 前置代理": "Hysteria2 requires a SOCKS5 first hop with UDP support"
 }

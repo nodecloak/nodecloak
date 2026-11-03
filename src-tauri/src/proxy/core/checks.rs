@@ -2,6 +2,77 @@ use super::*;
 use serde_json::json;
 use std::{path::PathBuf, thread};
 #[test]
+fn helper_accepts_hysteria2_and_keeps_system_network_guardrails() {
+    let up=Upstream{config:serde_json::from_value(json!({"mode":"hysteria2","host":"node.invalid","port":443,"node":{"tls":"tls","serverName":"node.invalid","insecure":true},"preProxy":{"mode":"socks5","host":"127.0.0.1","port":7890}})).unwrap(),password:"user:OpaquePassword".into()};
+    let config=node::config(&up,12345,"fixture","secret").unwrap();
+    assert!(validate_helper_config(&config).is_ok());
+    for key in ["set_system_proxy","listen"] {
+        let mut invalid=config.clone();invalid["inbounds"][0][key]=if key=="listen"{json!("0.0.0.0")}else{json!(true)};
+        assert!(validate_helper_config(&invalid).is_err());
+    }
+    let mut invalid=config;invalid["outbounds"][0]["uuid"]=json!("unexpected");assert!(validate_helper_config(&invalid).is_err());
+}
+
+#[test]
+#[ignore = "Starts loopback-only HY2 server, UDP SOCKS5 hop and owned profile relays"]
+fn installed_hysteria2_transfers_direct_and_udp_chain_and_rejects_bad_auth_tls() {
+    let binary=PathBuf::from(std::env::var_os("NODECLOAK_TEST_SINGBOX").expect("Set pinned sing-box fixture binary"));
+    let generated=crate::platform::command(binary.to_str().unwrap()).args(["generate","tls-keypair","nodecloak-test.invalid"]).output().unwrap();
+    assert!(generated.status.success());
+    let pem=String::from_utf8(generated.stdout).unwrap();
+    let certificate=pem[pem.find("-----BEGIN CERTIFICATE-----").unwrap()..].trim().to_owned();
+    let key=pem[..pem.find("-----BEGIN CERTIFICATE-----").unwrap()].trim().to_owned();
+    tauri::async_runtime::block_on(async {
+        let origin=TcpListener::bind("127.0.0.1:0").await.unwrap();let origin_port=origin.local_addr().unwrap().port();
+        let hits=Arc::new(std::sync::atomic::AtomicUsize::new(0));let received=hits.clone();
+        let target=tokio::spawn(async move { loop {
+            let (mut stream,_)=origin.accept().await.unwrap();let received=received.clone();
+            tokio::spawn(async move { if header(&mut stream).await.is_ok(){received.fetch_add(1,Ordering::SeqCst);let _=stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\nfixture").await;} });
+        }});
+        let reservation=tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();let node_port=reservation.local_addr().unwrap().port();drop(reservation);
+        let config=json!({"log":{"disabled":true},"inbounds":[{"type":"hysteria2","listen":"127.0.0.1","listen_port":node_port,"users":[{"password":"fixture-user:OpaqueSecret"}],"tls":{"enabled":true,"certificate":[certificate],"key":[key]}}],"outbounds":[{"type":"direct","tag":"fixture"}],"route":{"rules":[{"ip_cidr":["127.0.0.1/32"],"action":"route","outbound":"fixture"},{"action":"reject"}]}});
+        let mut child=crate::platform::command(binary.to_str().unwrap()).args(["run","-c","stdin"]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(serde_json::to_string(&config).unwrap().as_bytes()).unwrap();
+        let mut server=Server{child,_directory:tempfile::tempdir().unwrap()};
+        tokio::time::sleep(Duration::from_millis(400)).await;assert!(server.child.try_wait().unwrap().is_none());
+        let hop=TcpListener::bind("127.0.0.1:0").await.unwrap();let hop_port=hop.local_addr().unwrap().port();
+        let packets=Arc::new(std::sync::atomic::AtomicUsize::new(0));let forwarded=packets.clone();
+        let first_hop=tokio::spawn(async move {
+            let (mut control,_)=hop.accept().await.unwrap();assert_eq!(control.read_u8().await.unwrap(),5);
+            let count=control.read_u8().await.unwrap();let mut methods=vec![0;count as usize];control.read_exact(&mut methods).await.unwrap();assert!(methods.contains(&0));control.write_all(&[5,0]).await.unwrap();
+            let mut request=[0;4];control.read_exact(&mut request).await.unwrap();assert_eq!(&request[..3],&[5,3,0]);
+            let mut association=vec![0;match request[3]{1=>6,4=>18,_=>panic!("unexpected UDP associate address type")}];control.read_exact(&mut association).await.unwrap();
+            let udp=tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();let udp_port=udp.local_addr().unwrap().port();
+            let mut reply=vec![5,0,0,1,127,0,0,1];reply.extend(udp_port.to_be_bytes());control.write_all(&reply).await.unwrap();
+            let node=std::net::SocketAddr::from(([127,0,0,1],node_port));let mut client=None;let mut data=vec![0;65535];
+            loop {tokio::select! {
+                _=control.read_u8()=>break,
+                packet=udp.recv_from(&mut data)=>{
+                    let (length,source)=packet.unwrap();
+                    if source==node {
+                        if let Some(client)=client {let mut frame=vec![0,0,0,1,127,0,0,1];frame.extend(node_port.to_be_bytes());frame.extend_from_slice(&data[..length]);udp.send_to(&frame,client).await.unwrap();}
+                    }else{
+                        assert!(length>=10);assert_eq!(&data[..8],&[0,0,0,1,127,0,0,1]);assert_eq!(u16::from_be_bytes([data[8],data[9]]),node_port);
+                        client=Some(source);forwarded.fetch_add(1,Ordering::SeqCst);udp.send_to(&data[10..length],node).await.unwrap();
+                    }
+                }
+            }}
+        });
+        for (insecure,password,chain,expected) in [(true,"fixture-user:OpaqueSecret",false,true),(false,"fixture-user:OpaqueSecret",false,false),(true,"wrong-password",false,false),(true,"fixture-user:OpaqueSecret",true,true)] {
+            let up=Upstream {config:serde_json::from_value(json!({"mode":"hysteria2","host":"127.0.0.1","port":node_port,"node":{"tls":"tls","serverName":"nodecloak-test.invalid","insecure":insecure}})).unwrap(),password:password.into()};
+            let mut up=up;if chain{up.config.pre_proxy=Some(LocalProxy{mode:"socks5".into(),host:"127.0.0.1".into(),port:hop_port});}
+            let before=hits.load(Ordering::SeqCst);let relay=super::super::start(up,0).await.unwrap();
+            let client=reqwest::Client::builder().no_proxy().proxy(reqwest::Proxy::all(format!("http://127.0.0.1:{}",relay.port)).unwrap()).timeout(Duration::from_secs(8)).build().unwrap();
+            let result=client.get(format!("http://127.0.0.1:{origin_port}/")).send().await;
+            let success=match result {Ok(response)=>response.status().is_success()&&response.text().await.unwrap_or_default()=="fixture",Err(_)=>false};
+            assert_eq!(success,expected,"HY2 insecure={insecure},chain={chain}");assert_eq!(hits.load(Ordering::SeqCst)-before,usize::from(expected));
+            drop(client);drop(relay);eprintln!("HY2 insecure={insecure},chain={chain},expected_success={expected}: passed");
+        }
+        assert!(packets.load(Ordering::SeqCst)>0,"SOCKS5 UDP first hop was bypassed");
+        first_hop.abort();target.abort();drop(server);
+    });
+}
+#[test]
 fn windows_sid_accepts_local_and_entra_users_without_acl_arguments() {
     for sid in [
         "S-1-5-21-111-222-333-1001",

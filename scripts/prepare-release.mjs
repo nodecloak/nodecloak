@@ -20,10 +20,11 @@ for(const [platform,name] of Object.entries(names)) {
 }
 // User-facing notices only: no admin features, server internals or build/deployment details.
 const releaseNotes=[
-  "修复开启登录同步后，部分本机副本因数据读取失败而无法启动的问题；读取失败时保留数据并允许打开本人副本。 / Fixed owned local profiles failing to open when sign-in sync cannot read browser data. Local data is preserved and the profile can still open.",
-  "减少浏览器临时文件占用造成的同步失败；遇到短暂读取错误时自动重试。 / Reduced sync failures caused by browser temporary files and added a retry for transient read errors.",
-  "完善启动日志和同步提示，显示具体读取操作与系统错误码；同步失败时不会上传不完整的登录数据。 / Improved launch logs and sync messages with the failing operation and system error code. Incomplete sign-in data is never uploaded after a failed capture.",
-  "改善 Edge 恢复上次标签页时的区域设置初始化，等待设置确认后再打开页面；初始化失败时保留页面和原有会话。 / Improved regional initialization when Edge restores previous tabs. Navigation waits for confirmed settings, and failed initialization preserves pages and the existing session."
+  "新增 VLESS、VMess 和 Hysteria2 节点代理，可直接粘贴节点链接导入，并用于 Chrome、Edge 和 Firefox 浏览器副本。 / Added VLESS, VMess and Hysteria2 node proxies. Paste a node link to use it with Chrome, Edge or Firefox profiles.",
+  "每个运行中的副本使用独立代理，不修改系统代理或系统 DNS，也不启用 TUN；副本关闭后自动停止对应代理。 / Each running profile uses an independent proxy without changing system proxy or DNS settings or enabling TUN. Its proxy stops when the profile closes.",
+  "节点支持前置代理链路，保留本机或软路由代理设置。Hysteria2 链式连接需要支持 UDP 的 SOCKS5 前置代理，暂不支持混淆和端口跳跃。 / Node connections support a local or router first hop. Hysteria2 chaining requires SOCKS5 UDP forwarding; obfuscation and port hopping are not supported yet.",
+  "节点认证信息安全保存在系统凭据存储，支持副本复制和加密同步；已有 HTTP、HTTPS、SOCKS5 和 API 代理继续使用。 / Node credentials are kept in the system credential store and support profile copying and encrypted sync. Existing HTTP, HTTPS, SOCKS5 and API proxies remain available.",
+  "改善浏览器关闭与重启时的进程回收和等待，代理失败时不会自动切换直连。 / Improved browser process cleanup and restart waiting. Proxy failures never automatically fall back to a direct connection."
 ];
 const manifest={version,notes:releaseNotes.map(note=>`- ${note}`).join('\n'),pub_date:new Date().toISOString(),platforms};
 fs.writeFileSync(path.join(directory,'latest.json'),JSON.stringify(manifest,null,2)+'\n');

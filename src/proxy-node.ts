@@ -1,6 +1,6 @@
 import type {ProxyConfig} from './browser-profiles';
-export interface NodeOptions {tls:'none'|'tls'|'reality';serverName:string;fingerprint:string;publicKey:string;shortId:string;alpn:string[];flow:string;transport:'tcp'|'ws'|'httpupgrade'|'grpc';host:string;path:string;serviceName:string;security:string;alterId:number}
-export const isNodeMode=(mode:string)=>mode==='vless'||mode==='vmess';
+export interface NodeOptions {tls:'none'|'tls'|'reality';insecure?:boolean;serverName:string;fingerprint:string;publicKey:string;shortId:string;alpn:string[];flow:string;transport:'tcp'|'ws'|'httpupgrade'|'grpc';host:string;path:string;serviceName:string;security:string;alterId:number}
+export const isNodeMode=(mode:string)=>mode==='vless'||mode==='vmess'||mode==='hysteria2';
 const fail=()=>new Error('节点链接包含不支持或无效的参数，请检查协议、TLS 和传输设置');
 const clean=(value:unknown,max=2048)=>{if(typeof value!=='string'||value.length>max||/[\x00-\x1f\x7f]/.test(value))throw fail();return value;};
 const text=(value:unknown,fallback='')=>value==null?fallback:clean(value);
@@ -18,6 +18,8 @@ export function validNode(node:NodeOptions,mode:string):boolean {
   if(node.tls!=='reality'&&(node.publicKey||node.shortId))return false;
   if(node.flow&&(mode!=='vless'||node.flow!=='xtls-rprx-vision'||node.tls==='none'||node.transport!=='tcp'))return false;
   if(mode==='vless'&&(node.alterId||node.security!=='auto'))return false;
+  if(node.insecure!==undefined&&typeof node.insecure!=='boolean'||mode!=='hysteria2'&&node.insecure)return false;
+  if(mode==='hysteria2'&&(node.tls!=='tls'||node.transport!=='tcp'||node.fingerprint||node.flow||node.alterId||node.security!=='auto'))return false;
   if(node.transport==='tcp'&&(node.host||node.path||node.serviceName))return false;
   if(node.transport==='grpc'&&(node.host||node.path)||node.transport!=='grpc'&&node.serviceName)return false;
   return true;
@@ -27,7 +29,7 @@ export function parseNodeUri(input:string):{proxy:ProxyConfig;password:string} {
  try {
   const value=clean(input.trim(),16384);
   const node:NodeOptions={tls:'none',serverName:'',fingerprint:'',publicKey:'',shortId:'',alpn:[],flow:'',transport:'tcp',host:'',path:'',serviceName:'',security:'auto',alterId:0};
-  let host:string,port:number,uuid:string,mode:'vless'|'vmess';
+  let host:string,port:number,uuid:string,mode:'vless'|'vmess'|'hysteria2';
   if(value.startsWith('vless://')) {
    mode='vless';const url=new URL(value);host=url.hostname.replace(/^\[|\]$/g,'');port=Number(url.port);uuid=decodeURIComponent(url.username);
    if(url.password||url.pathname&&url.pathname!=='/')throw fail();
@@ -45,9 +47,19 @@ export function parseNodeUri(input:string):{proxy:ProxyConfig;password:string} {
    const transport=text(data.net,'tcp');
    if(transport==='grpc'&&text(data.host))throw fail();
    Object.assign(node,{tls:text(data.tls)||'none',serverName:text(data.sni),fingerprint:text(data.fp),alpn:text(data.alpn)?text(data.alpn).split(','):[],transport,host:transport==='grpc'?'':text(data.host),path:transport==='grpc'?'':text(data.path),serviceName:transport==='grpc'?text(data.path):'',security:text(data.scy,'auto'),alterId:Number(data.aid??0)});
+  }else if(/^(hysteria2|hy2):\/\//.test(value)){
+   mode='hysteria2';const url=new URL(value);host=url.hostname.replace(/^\[|\]$/g,'');port=Number(url.port||443);
+   const authority=value.slice(value.indexOf('://')+3).split(/[/?#]/)[0];
+   if(!authority.includes('@')||url.pathname&&url.pathname!=='/')throw fail();
+   uuid=clean(decodeURIComponent(authority.slice(0,authority.lastIndexOf('@'))),255);
+   const allowed=['sni','insecure'],seen=new Set<string>();
+   url.searchParams.forEach((_,key)=>{if(!allowed.includes(key)||seen.has(key))throw fail();seen.add(key);});
+   const insecure=url.searchParams.get('insecure')??'0';if(!['0','1'].includes(insecure))throw fail();
+   Object.assign(node,{tls:'tls',serverName:url.searchParams.get('sni')??'',insecure:insecure==='1'});
   }else throw fail();
-  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid)||!Number.isInteger(port)||port<1||port>65535||!host||host.length>253||/[\s/@?#\\]/.test(host)||!validNode(node,mode))throw fail();
+  if(mode==='hysteria2'?!uuid||new TextEncoder().encode(uuid).length>255:!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid))throw fail();
+  if(!Number.isInteger(port)||port<1||port>65535||!host||host.length>253||/[\s/@?#\\]/.test(host)||!validNode(node,mode))throw fail();
   if(host.includes(':'))new URL(`http://[${host}]/`);else if(!host.split('.').every(p=>p.length>0&&p.length<=63&&/^[a-z0-9-]+$/i.test(p)))throw fail();
-  return {proxy:{mode,host,port,username:'',node},password:uuid.toLowerCase()};
+  return {proxy:{mode,host,port,username:'',node},password:mode==='hysteria2'?uuid:uuid.toLowerCase()};
  }catch{throw fail();}
 }

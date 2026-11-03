@@ -1,6 +1,27 @@
 import {expect,it} from 'vitest';
 import {parseProxyUri,defaults,validateDraft,selectProxyMode} from './browser-profiles';
 const uuid='11111111-1111-4111-8111-111111111111';
+it('imports HY2 aliases with opaque userpass, SNI and explicit insecure TLS',()=>{
+ for(const scheme of ['hysteria2','hy2']){
+  const result=parseProxyUri(`${scheme}://test-user:Secret%3AAbC@192.0.2.10:39114?insecure=1&sni=example.com#test`);
+  expect(result.password).toBe('test-user:Secret:AbC');
+  expect(result.proxy).toMatchObject({mode:'hysteria2',host:'192.0.2.10',port:39114,username:'',node:{tls:'tls',serverName:'example.com',insecure:true}});
+  expect(JSON.stringify(result.proxy)).not.toContain('Secret');
+  expect(validateDraft({...defaults(),name:'HY2',...result})).toBeNull();
+  expect(selectProxyMode({...defaults(),...result},'http').password).toBe('');
+ }
+ const secure=parseProxyUri('hy2://CaseSensitive%40Token@[2001:db8::1]/?insecure=0');
+ expect(secure.password).toBe('CaseSensitive@Token');expect(secure.proxy.port).toBe(443);
+ expect(secure.proxy.host).toBe('2001:db8::1');expect(secure.proxy.node?.insecure).toBe(false);
+});
+it('rejects malformed HY2 settings and HTTP chains instead of losing UDP or credentials',()=>{
+ for(const suffix of ['insecure=true','insecure=1&insecure=0','obfs=salamander&obfs-password=test','unknown=1','sni=bad%20host'])
+  expect(()=>parseProxyUri(`hy2://Token@node.example:443?${suffix}`)).toThrow();
+ for(const value of ['hy2://node.example:443','hy2://Token@node.example:0','hy2://Token@node.example:443/path','hy2://Token%0A@node.example:443'])expect(()=>parseProxyUri(value)).toThrow();
+ const draft={...defaults(),name:'HY2',...parseProxyUri('hy2://Token@node.example')};
+ for(const mode of ['http','https'] as const)expect(validateDraft({...draft,proxy:{...draft.proxy,preProxy:{mode,host:'127.0.0.1',port:7890}}})).toContain('UDP');
+ expect(validateDraft({...draft,proxy:{...draft.proxy,preProxy:{mode:'socks5',host:'127.0.0.1',port:7890}}})).toBeNull();
+});
 it('imports VLESS Reality and VMess WS without storing raw links or UUID in config',()=>{
  const vless=parseProxyUri(`vless://${uuid}@node.example:443?security=reality&sni=edge.example&pbk=${'A'.repeat(43)}&sid=01&fp=chrome&flow=xtls-rprx-vision&type=tcp#JP`);
  expect(vless.password).toBe(uuid);

@@ -133,6 +133,8 @@ jobs:
           set -euo pipefail
           cargo build --manifest-path src-tauri/Cargo.toml --locked
           if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"; else export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak"; fi
+          core_platform=$(node -p "process.platform+'-'+process.arch")
+          if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_SINGBOX="$GITHUB_WORKSPACE/.tools/singbox/$core_platform/sing-box.exe"; else export NODECLOAK_TEST_SINGBOX="$GITHUB_WORKSPACE/.tools/singbox/$core_platform/sing-box"; fi
           cargo test --manifest-path src-tauri/Cargo.toml --locked proxy::core::checks -- --ignored --nocapture --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml --locked native_node_credentials_copy_edit_sync_and_reset_are_scoped -- --ignored --nocapture --test-threads=1
       - name: Verify saved browser pages after profile restart
@@ -181,6 +183,17 @@ jobs:
           NODECLOAK_TEST_HEADLESS_BROWSERS: '1'
           NODECLOAK_TEST_FIREFOX_NATIVE_HOST: ${{ github.workspace }}/src-tauri/target/release/nodecloak
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked native_firefox_signed_fingerprint_launch_and_disable -- --ignored --nocapture --test-threads=1
+      - name: Verify node proxy startup from the final macOS application
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/release/bundle/macos/NodeCloak.app/Contents/MacOS/nodecloak"
+          core_platform=$(node -p "process.platform+'-'+process.arch")
+          export NODECLOAK_TEST_SINGBOX="$GITHUB_WORKSPACE/.tools/singbox/$core_platform/sing-box"
+          test -x "$NODECLOAK_TEST_PROXY_HOST"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked installed_node_transports_reach_only_local_fixture -- --ignored --nocapture --test-threads=1
+          cargo test --manifest-path src-tauri/Cargo.toml --locked installed_hysteria2_transfers_direct_and_udp_chain_and_rejects_bad_auth_tls -- --ignored --nocapture --test-threads=1
       - name: Verify Start menu shortcuts on installs and updates
         if: runner.os == 'Windows'
         run: node --test scripts/windows-shortcut-checks.mjs
