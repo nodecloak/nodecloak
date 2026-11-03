@@ -1159,14 +1159,24 @@ pub fn close_profile(profile: &Path) -> Result<(), String> {
     for pid in ids {
         // SIGTERM does not reliably run Firefox's storage shutdown phases.
         // Address only this profile's main PID, never every app of that name.
-        let script = format!("ObjC.import('AppKit'); const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier({pid}); if(!app.isNil() && !app.terminate) throw new Error('Browser refused normal quit');");
-        if let Err(error) = output("/usr/bin/osascript", &["-l", "JavaScript", "-e", &script]) {
+        let script = format!("ObjC.import('AppKit'); const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier({pid}); if(app.isNil()){{console.log('unregistered');}}else{{console.log('finishedLaunching='+app.finishedLaunching);if(!app.terminate) throw new Error('Browser refused normal quit');console.log('requested');}}");
+        let quit = output("/usr/bin/osascript", &["-l", "JavaScript", "-e", &script]);
+        #[cfg(test)]
+        eprintln!("native normal quit pid={pid}: {quit:?}");
+        if let Err(error) = quit {
             if profile_process_ids(profile)?.contains(&pid) {
                 return Err(error);
             }
         }
     }
-    wait_profile_closed(profile, std::time::Duration::from_secs(8))
+    let closed=wait_profile_closed(profile, std::time::Duration::from_secs(8));
+    #[cfg(all(test,target_os="macos"))]
+    if closed.is_err() {
+        let ids=profile_process_ids(profile).unwrap_or_default();
+        eprintln!("native normal quit timeout main_ids={ids:?}");
+        if !ids.is_empty(){eprintln!("native normal quit remaining: {:?}",output("/bin/ps", &["-o","pid=,ppid=,stat=,comm=","-p",&ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",")]));}
+    }
+    closed
 }
 
 pub(crate) fn wait_profile_closed(profile: &Path, timeout: std::time::Duration) -> Result<(), String> {
