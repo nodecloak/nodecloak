@@ -14,4 +14,4 @@
 - [x] Implement stdin-only configuration, private loopback listener, authenticated readiness, bounded port retries, parent-pipe lifecycle and per-profile process cleanup; no global process termination.
 - [x] Verify real local VLESS/VMess servers, first-hop ordering, simultaneous isolation, failure closed, core/parent termination, unrelated core survival, no configuration secrets on disk and unchanged system network settings.
 - [x] Add node-link import and read-only connection summary within the existing proxy editor; credentials masked, keyboard accessible, existing front-proxy UI retained; translate copy.
-- [ ] Run targeted/full Rust/frontend/build checks, read-only code review, and platform CI/integration checks where available. Record actual platform limitations without claiming untested success.
+- [x] Run targeted/full Rust/frontend/build checks, read-only code review, and platform CI/integration checks where available. Record actual platform limitations without claiming untested success.
