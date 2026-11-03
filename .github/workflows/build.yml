@@ -144,6 +144,16 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --locked native_session_resume_chromium_after_protection -- --ignored --nocapture --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml --locked native_session_resume_firefox_after_region_setup -- --ignored --nocapture --test-threads=1
           cargo test --manifest-path src-tauri/Cargo.toml --locked native_session_resume_firefox_system_settings_unchanged -- --ignored --nocapture --test-threads=1
+      - name: Verify Windows application proxy routing and cleanup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:NODECLOAK_TEST_APP_PROXY_HOST="$env:GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"
+          $env:NODECLOAK_TEST_SINGBOX="$env:GITHUB_WORKSPACE/.tools/singbox/win32-x64/sing-box.exe"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib installed_core_accepts_application_configs_without_network_changes -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_application_proxy_routes_tcp_udp_and_releases_only_owned_network -- --ignored --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Import Developer ID and validate notarization credentials
         if: env.MACOS_NOTARIZE == 'true'
         run: node scripts/macos-signing.mjs prepare
@@ -197,6 +207,13 @@ jobs:
       - name: Verify Start menu shortcuts on installs and updates
         if: runner.os == 'Windows'
         run: node --test scripts/windows-shortcut-checks.mjs
+      - name: Verify application proxy from the final Windows program
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:NODECLOAK_TEST_APP_PROXY_HOST="$env:GITHUB_WORKSPACE/src-tauri/target/release/nodecloak.exe"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_application_proxy_routes_tcp_udp_and_releases_only_owned_network -- --ignored --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
       - name: Collect third-party notices
         run: node scripts/collect-release-notices.mjs ${{ matrix.platform }} ${{ matrix.target }}
       - name: Record checked-out build source

@@ -20,12 +20,12 @@ for(const [platform,name] of Object.entries(names)) {
 }
 // User-facing notices only: no admin features, server internals or build/deployment details.
 const releaseNotes=[
-  "新增 VLESS、VMess 和 Hysteria2 节点代理，可直接粘贴节点链接导入，并用于 Chrome、Edge 和 Firefox 浏览器副本。 / Added VLESS, VMess and Hysteria2 node proxies. Paste a node link to use it with Chrome, Edge or Firefox profiles.",
-  "每个运行中的副本使用独立代理，不修改系统代理或系统 DNS，也不启用 TUN；副本关闭后自动停止对应代理。 / Each running profile uses an independent proxy without changing system proxy or DNS settings or enabling TUN. Its proxy stops when the profile closes.",
-  "节点支持前置代理链路，保留本机或软路由代理设置。Hysteria2 链式连接需要支持 UDP 的 SOCKS5 前置代理，暂不支持混淆和端口跳跃。 / Node connections support a local or router first hop. Hysteria2 chaining requires SOCKS5 UDP forwarding; obfuscation and port hopping are not supported yet.",
-  "节点认证信息安全保存在系统凭据存储，支持副本复制和加密同步；已有 HTTP、HTTPS、SOCKS5 和 API 代理继续使用。 / Node credentials are kept in the system credential store and support profile copying and encrypted sync. Existing HTTP, HTTPS, SOCKS5 and API proxies remain available. 同步节点配置的设备需升级至 4.0.0。 / Devices syncing node configurations need version 4.0.0.",
-  "改善浏览器关闭与重启时的进程回收和等待，代理失败时不会自动切换直连。 / Improved browser process cleanup and restart waiting. Proxy failures never automatically fall back to a direct connection.",
-  "改善 macOS 浏览器副本关闭和再次启动时的兼容性。 / Improved compatibility when closing and reopening browser profiles on macOS."
+  "Windows 新增独立「应用代理」，可为 Codex、ChatGPT、Claude 或自选程序设置代理节点，按程序路径分流。应用代理暂仅支持 Windows。 / Windows gains an independent Application Proxy workspace. Assign proxy nodes to Codex, ChatGPT, Claude or a selected executable using path-based rules. Application Proxy is currently Windows-only.",
+  "应用代理默认关闭。先保存节点并为已安装应用选择节点，再点击开启并完成 Windows 管理员授权；临时使用 TUN 路由，未匹配的应用直连，系统 HTTP 代理和 DNS 设置保持不变。 / Application Proxy is off by default. Save a node, assign it to an installed app, then start and approve Windows administrator permission. Temporary TUN routing sends unmatched applications directly while preserving system HTTP proxy and DNS settings.",
+  "支持 HTTP、HTTPS、SOCKS5、VLESS、VMess 和 Hysteria2 节点，保留可选的本机或软路由前置代理。Hysteria2 链式连接需要 SOCKS5 UDP 支持。 / Supports HTTP, HTTPS, SOCKS5, VLESS, VMess and Hysteria2 nodes, with an optional local or router first hop. Hysteria2 chaining requires SOCKS5 UDP support.",
+  "新增匹配连接与运行记录，可查看应用实际命中的节点、目标及收发流量。节点不可用时，已匹配的连接不会自动切换直连。 / Matching connections and activity records show the selected node, destination and traffic for observed app connections. Matched connections do not automatically fall back to direct when their node fails.",
+  "停止应用代理后释放本次接口和路由；修改规则前需先停止，退出 NodeCloak 或应用内更新时也会停止。应用自身代理、本机回环和共享宿主流量不保证由所选程序规则接管。 / Stopping releases the session interface and routes. Stop before editing rules; quitting NodeCloak or preparing an in-app update also stops routing. App-specific proxies, loopback and shared-host traffic are not guaranteed to follow the selected executable rule.",
+  "浏览器副本继续使用原来的独立代理方式，Chrome、Edge、Firefox 的节点代理、稳定指纹、MCP、同步和分享功能继续保留。统一应用代理页面的标题与标签样式。 / Browser profiles retain their independent proxy behavior. Chrome, Edge and Firefox node proxies, stable fingerprints, MCP, sync and sharing remain available. Application Proxy headings and labels now follow the shared visual style."
 ];
 const manifest={version,notes:releaseNotes.map(note=>`- ${note}`).join('\n'),pub_date:new Date().toISOString(),platforms};
 fs.writeFileSync(path.join(directory,'latest.json'),JSON.stringify(manifest,null,2)+'\n');

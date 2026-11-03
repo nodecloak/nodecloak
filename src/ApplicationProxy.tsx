@@ -58,7 +58,7 @@ export default function ApplicationProxy(){
  const phase=view?.runtime.phase;
  const status=phase==='running'?'已开启':phase==='starting'?'正在启动':phase==='stopping'?'正在停止':view?.runtime.needsCleanup?'等待释放网络接口':'未开启';
  return <section className="application-proxy" aria-label={t('应用代理')}>
-  <div className="ap-hero"><div className="ap-hero-icon"><Network size={25}/></div><div className="ap-hero-copy"><span className="ap-eyebrow">YOUR APPS. YOUR ROUTES.</span><h2>{t('每个应用，独立连接。')}</h2><p>{t('为应用指定代理节点，其他应用保持直连。浏览器副本继续使用原来的代理配置。')}</p></div><div className="ap-control"><span className={`ap-state ${phase==='running'?'is-running':''}`}><i/>{t(status)}</span><button className={`button ${running?'secondary':'primary'}`} disabled={!!pending||!supported||!view} onClick={()=>void action(running?'stop':'start')}>
+  <div className="ap-hero"><div className="ap-hero-icon"><Network size={25}/></div><div className="ap-hero-copy"><span className="eyebrow">YOUR APPS. YOUR ROUTES.</span><h2>{t('每个应用，独立连接。')}</h2><p>{t('为应用指定代理节点，其他应用保持直连。浏览器副本继续使用原来的代理配置。')}</p></div><div className="ap-control"><span className={`ap-state ${phase==='running'?'is-running':''}`}><i/>{t(status)}</span><button className={`button ${running?'secondary':'primary'}`} disabled={!!pending||!supported||!view} onClick={()=>void action(running?'stop':'start')}>
    {pending==='start'||pending==='stop'?<LoaderCircle size={16} className="spin"/>:<Power size={16}/>}{t(pending==='start'?'正在请求授权并启动':pending==='stop'?'正在停止':running?'停止应用代理':'开启应用代理')}
   </button>{pending==='start'&&<button className="ap-link" onClick={()=>void action('stop')}>{t('取消启动')}</button>}</div></div>
   {!supported&&<div className="ap-notice" role="status">{t('应用代理当前仅支持 Windows。浏览器副本的代理功能仍可正常使用。')}</div>}
