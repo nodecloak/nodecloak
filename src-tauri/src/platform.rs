@@ -1159,7 +1159,7 @@ pub fn close_profile(profile: &Path) -> Result<(), String> {
     for pid in ids {
         // SIGTERM does not reliably run Firefox's storage shutdown phases.
         // Address only this profile's main PID, never every app of that name.
-        let script = format!("ObjC.import('AppKit'); const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier({pid}); if(app.isNil()){{console.log('unregistered');}}else{{console.log('finishedLaunching='+app.finishedLaunching);if(!app.terminate) throw new Error('Browser refused normal quit');console.log('requested');}}");
+        let script = format!("ObjC.import('AppKit'); const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier({pid}); let result='unregistered';if(!app.isNil()){{result='finishedLaunching='+app.finishedLaunching;if(!app.terminate) throw new Error('Browser refused normal quit');result+=';requested';}}result;");
         let quit = output("/usr/bin/osascript", &["-l", "JavaScript", "-e", &script]);
         #[cfg(test)]
         eprintln!("native normal quit pid={pid}: {quit:?}");
