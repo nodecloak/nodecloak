@@ -665,7 +665,8 @@ fn connections(
                     .any(|c| c.as_str() == Some(&format!("proxy-{}", r.proxy_id)))
             }) && r.paths.iter().any(|known| {
                 if r.exact_paths {
-                    discovery::normalize(known) == discovery::normalize(path)
+                    discovery::normalize(&discovery::canonical_executable(known))
+                        == discovery::normalize(&discovery::canonical_executable(path))
                 } else {
                     super::config::path_pattern(known) == super::config::path_pattern(path)
                 }

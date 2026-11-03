@@ -38,6 +38,9 @@ impl Fixture {
             while !ts.load(Ordering::Acquire) {
                 match tcp.accept() {
                     Ok((mut stream, _)) => {
+                        // Windows inherits the listener's nonblocking mode;
+                        // handshake reads must wait for the next SOCKS frame.
+                        stream.set_nonblocking(false).unwrap();
                         let hits = th.clone();
                         std::thread::spawn(move || {
                             stream
@@ -51,6 +54,7 @@ impl Fixture {
                             if stream.read_exact(&mut methods).is_err() {
                                 return;
                             }
+                            eprintln!("fixture SOCKS greeting: {greeting:?}, methods: {methods:?}");
                             if stream.write_all(&[5, 0]).is_err() {
                                 return;
                             }
@@ -58,6 +62,7 @@ impl Fixture {
                             if stream.read_exact(&mut request).is_err() {
                                 return;
                             }
+                            eprintln!("fixture SOCKS request: {request:?}");
                             let count = match request[3] {
                                 1 => 4,
                                 4 => 16,
@@ -83,10 +88,9 @@ impl Fixture {
                             } else if request[1] == 1 {
                                 let _ = stream.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]);
                                 let mut bytes = [0; 15];
-                                if stream
-                                    .read_exact(&mut bytes)
-                                    .is_ok_and(|_| &bytes == b"nodecloak-probe")
-                                {
+                                let read = stream.read_exact(&mut bytes);
+                                eprintln!("fixture TCP payload: {read:?}, {bytes:?}");
+                                if read.is_ok() && &bytes == b"nodecloak-probe" {
                                     hits.fetch_add(1, Ordering::AcqRel);
                                     let _ = stream.write_all(b"via-proxy");
                                     std::thread::sleep(Duration::from_millis(250));
@@ -126,6 +130,30 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
     }
+}
+#[tokio::test]
+async fn synthetic_socks_fixture_carries_a_complete_request_without_tun() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let fixture = Fixture::start();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", fixture.port))
+        .await
+        .unwrap();
+    stream.write_all(&[5, 1, 0]).await.unwrap();
+    let mut hello = [0; 2];
+    stream.read_exact(&mut hello).await.unwrap();
+    assert_eq!(hello, [5, 0]);
+    stream
+        .write_all(&[5, 1, 0, 1, 198, 18, 0, 10, 0xa8, 0xca])
+        .await
+        .unwrap();
+    let mut connected = [0; 10];
+    stream.read_exact(&mut connected).await.unwrap();
+    assert_eq!(&connected[..2], &[5, 0]);
+    stream.write_all(b"nodecloak-probe").await.unwrap();
+    let mut reply = [0u8; 9];
+    stream.read_exact(&mut reply).await.unwrap();
+    assert_eq!(&reply, b"via-proxy");
+    assert_eq!(fixture.hits.load(Ordering::Acquire), 1);
 }
 fn request(paths: &[(String, String)], port: u16) -> ipc::StartRequest {
     ipc::StartRequest {

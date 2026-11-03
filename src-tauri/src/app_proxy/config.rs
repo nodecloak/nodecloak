@@ -64,6 +64,10 @@ pub fn path_pattern(path: &str) -> String {
 }
 pub fn exact_pattern(path: &str) -> String {
     let normalized = normalize(&super::discovery::canonical_executable(path));
+    raw_exact_pattern(&normalized)
+}
+fn raw_exact_pattern(path: &str) -> String {
+    let normalized = normalize(path);
     let mut pattern = String::from("(?i)^");
     for c in normalized.chars() {
         if "\\.+*?()[]{}^$|".contains(c) {
@@ -73,6 +77,67 @@ pub fn exact_pattern(path: &str) -> String {
     }
     pattern.push('$');
     pattern
+}
+fn path_patterns(path: &str, exact: bool) -> Vec<String> {
+    let mut patterns = vec![if exact {
+        exact_pattern(path)
+    } else {
+        path_pattern(path)
+    }];
+    // Windows may retain either the original launch path or its long name in
+    // process metadata. Keep only exact filesystem aliases, never a name glob.
+    patterns.push(raw_exact_pattern(path));
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let long = super::discovery::canonical_executable(path);
+        let input: Vec<_> = std::ffi::OsStr::new(&long)
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        let mut buffer = vec![0u16; 32768];
+        let count = unsafe {
+            windows_sys::Win32::Storage::FileSystem::GetShortPathNameW(
+                input.as_ptr(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+            )
+        } as usize;
+        if count > 0 && count < buffer.len() {
+            let short = normalize(&String::from_utf16_lossy(&buffer[..count]));
+            patterns.push(raw_exact_pattern(&short));
+            let long = normalize(&long);
+            let long_parts: Vec<_> = long.split('\\').collect();
+            let short_parts: Vec<_> = short.split('\\').collect();
+            if long_parts.len() == short_parts.len() {
+                let literal = |s: &str| {
+                    let mut out = String::new();
+                    for c in s.chars() {
+                        if "\\.+*?()[]{}^$|".contains(c) {
+                            out.push('\\');
+                        }
+                        out.push(c);
+                    }
+                    out
+                };
+                let parts: Vec<_> = long_parts
+                    .iter()
+                    .zip(short_parts)
+                    .map(|(a, b)| {
+                        if *a == b {
+                            literal(a)
+                        } else {
+                            format!("(?:{}|{})", literal(a), literal(b))
+                        }
+                    })
+                    .collect();
+                patterns.push(format!("(?i)^{}$", parts.join(r"\\")));
+            }
+        }
+    }
+    patterns.sort();
+    patterns.dedup();
+    patterns
 }
 pub fn valid_path(path: &str) -> bool {
     let path = normalize(path);
@@ -204,7 +269,7 @@ pub fn compile(
                     return Err("同一个程序不能同时使用两条代理规则".into());
                 }
                 seen.push((pattern.clone(), family, rule.exact_paths));
-                paths.push(pattern);
+                paths.extend(path_patterns(path, rule.exact_paths));
             }
         }
         routing.push(json!({"process_path_regex":paths,"action":"route","outbound":format!("proxy-{}",rule.proxy_id)}));

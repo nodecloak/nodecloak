@@ -137,6 +137,23 @@ fn windows_short_names_match_the_actual_long_image_path() {
         config::exact_pattern(&long),
         "8.3 paths must match QueryFullProcessImageName's long path"
     );
+    if short.contains('~') {
+        let generated =
+            config::compile(&[rule(&short)], &[proxy()], 51234, &"a".repeat(64), ID).unwrap();
+        let patterns = generated["route"]["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["outbound"] == format!("proxy-{ID}"))
+            .unwrap()["process_path_regex"]
+            .as_array()
+            .unwrap();
+        assert!(
+            patterns.iter().any(|p| p.as_str().unwrap().contains('~')),
+            "Windows may report the original short image path; keep that exact alias too"
+        );
+        assert!(patterns.iter().any(|p| !p.as_str().unwrap().contains('~')));
+    }
 }
 #[test]
 fn app_tun_routes_only_assigned_paths_and_preserves_system_dns_and_browser_relays() {

@@ -33,7 +33,7 @@ pub fn preflight(snapshot: &Snapshot, interface: &str) -> Result<(), String> {
     }
     for adapter in snapshot.adapters.iter().filter(|a| a.up) {
         let description = format!("{} {}", adapter.name, adapter.description).to_lowercase();
-        let tunnel = [23, 131].contains(&adapter.kind)
+        let tunnel = [23, 53, 131].contains(&adapter.kind)
             || [
                 "wintun",
                 "wireguard",
@@ -41,6 +41,7 @@ pub fn preflight(snapshot: &Snapshot, interface: &str) -> Result<(), String> {
                 "clash",
                 "mihomo",
                 "sing-box",
+                "sing-tun",
                 "openvpn",
                 "tailscale",
                 "zerotier",
