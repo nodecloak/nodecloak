@@ -24,6 +24,11 @@ use std::{
 };
 #[cfg(test)]
 mod checks;
+fn trace(message: &str) {
+    if cfg!(debug_assertions) && std::env::var_os("NODECLOAK_TEST_PROXY_DIAGNOSTICS").is_some() {
+        eprintln!("proxy-core: {message}");
+    }
+}
 
 #[cfg(windows)]
 struct ChildJob(windows_sys::Win32::Foundation::HANDLE);
@@ -86,6 +91,11 @@ impl Core {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        if cfg!(test) && std::env::var_os("NODECLOAK_TEST_PROXY_HOST").is_some() {
+            command
+                .env("NODECLOAK_TEST_PROXY_DIAGNOSTICS", "1")
+                .stderr(Stdio::inherit());
+        }
         // Child dialers must not inherit a proxy environment and loop through
         // another application's global proxy variables.
         for key in [
@@ -199,6 +209,12 @@ pub async fn start(up: Upstream) -> Result<(Upstream, Arc<Core>), String> {
             }
             tokio::time::sleep(Duration::from_millis(40)).await;
         }
+        #[cfg(test)]
+        eprintln!(
+            "owned startup: process_running={}, channel_state={}",
+            core.running(),
+            core.status.load(Ordering::Acquire)
+        );
         drop(core);
     }
     Err("副本代理内核未就绪；请重新导入节点或重启副本".into())
@@ -251,6 +267,7 @@ pub fn run_stdio() -> Result<(), String> {
     // Only generated loopback HTTP configs may enter this host; never accept
     // arbitrary TUN, route manipulation, services, API or DNS listeners.
     validate_helper_config(&config)?;
+    trace("generated config accepted");
     let directory = tempfile::Builder::new()
         .prefix("nodecloak-core-")
         .tempdir()
@@ -297,6 +314,7 @@ pub fn run_stdio() -> Result<(), String> {
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))
             .map_err(|_| "无法设置代理程序权限")?;
     }
+    trace("owned executable prepared");
     let mut child = crate::platform::command(binary.to_str().ok_or("代理程序路径无效")?)
         .args(["run", "--disable-color", "-c", "stdin"])
         .current_dir(directory.path())
@@ -305,6 +323,7 @@ pub fn run_stdio() -> Result<(), String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| "无法启动节点内核")?;
+    trace("owned process spawned");
     #[cfg(windows)]
     let _job = match ChildJob::attach(&child) {
         Ok(job) => job,
@@ -346,6 +365,13 @@ pub fn run_stdio() -> Result<(), String> {
                 break;
             }
             let text = String::from_utf8_lossy(&line);
+            if text.contains("tcp server started") || text.contains("sing-box started") {
+                trace(&format!(
+                    "startup event: prefix={:?}, length={}",
+                    &line[..line.len().min(24)],
+                    line.len()
+                ));
+            }
             if text
                 .trim_end()
                 .split_once("] ")
@@ -354,6 +380,7 @@ pub fn run_stdio() -> Result<(), String> {
                 bound = true;
             }
             if bound && text.contains("] sing-box started (") {
+                trace("owned listener bound; startup complete");
                 let _ = startup_tx.send(());
                 break;
             }
@@ -374,6 +401,7 @@ pub fn run_stdio() -> Result<(), String> {
     let mut announced = false;
     loop {
         if !announced && startup_rx.try_recv().is_ok() {
+            trace("announcing readiness");
             if std::io::stdout()
                 .write_all(b"R")
                 .and_then(|_| std::io::stdout().flush())
@@ -386,17 +414,19 @@ pub fn run_stdio() -> Result<(), String> {
             announced = true;
         }
         if rx.recv_timeout(Duration::from_millis(50)).is_ok() {
+            trace("owner pipe EOF; stopping owned process");
             let _ = child.kill();
             let _ = child.wait();
             return Ok(());
         }
         match child.try_wait() {
             Ok(Some(status)) => {
+                trace(&format!("owned process exited: {status}"));
                 return if status.success() {
                     Ok(())
                 } else {
                     Err("节点内核已退出".into())
-                }
+                };
             }
             Err(_) => {
                 let _ = child.kill();

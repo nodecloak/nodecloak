@@ -1,0 +1,72 @@
+name: Profile proxy checks
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to verify
+        type: choice
+        options: [all, macos-arm64, macos-x64, windows-x64]
+        default: all
+permissions:
+  contents: read
+concurrency:
+  group: profile-proxy-${{ github.ref }}-${{ inputs.platform }}
+  cancel-in-progress: false
+jobs:
+  proxy:
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.platform == 'macos-arm64' && '[{"os":"macos-15","platform":"macos-arm64"}]' || (inputs.platform == 'macos-x64' && '[{"os":"macos-15-intel","platform":"macos-x64"}]' || (inputs.platform == 'windows-x64' && '[{"os":"windows-latest","platform":"windows-x64"}]' || '[{"os":"windows-latest","platform":"windows-x64"},{"os":"macos-15","platform":"macos-arm64"},{"os":"macos-15-intel","platform":"macos-x64"}]'))) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      NODECLOAK_TEST_HEADLESS_BROWSERS: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+      - run: npm ci
+      - run: node scripts/prepare-singbox.mjs
+      - run: npm test
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --locked
+      - name: Check owned node transport startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"; else export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak"; fi
+          cargo test --manifest-path src-tauri/Cargo.toml --locked installed_node_transports_reach_only_local_fixture -- --ignored --nocapture --test-threads=1
+      - name: Install disposable-browser test dependencies on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ ! -x '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' ]; then brew install --cask google-chrome; fi
+          if [ ! -x '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' ]; then brew install --cask microsoft-edge; fi
+          if [ ! -x '/Applications/Firefox.app/Contents/MacOS/firefox' ]; then brew install --cask firefox; fi
+      - name: Install disposable-browser test dependencies on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($app in @(@('googlechrome','C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'),@('microsoft-edge','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe','C:/Program Files/Microsoft/Edge/Application/msedge.exe'),@('firefox','C:/Program Files/Mozilla Firefox/firefox.exe','C:/Program Files (x86)/Mozilla Firefox/firefox.exe'))) {
+            if (!(Test-Path $app[1]) -and !(Test-Path $app[2])) { choco install $app[0] --yes --no-progress; if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE} }
+          }
+      - name: Check browsers, isolation, lifecycle and credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"; else export NODECLOAK_TEST_PROXY_HOST="$GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak"; fi
+          cargo test --manifest-path src-tauri/Cargo.toml --locked installed_core_isolated_nodes_first_hop_shutdown_and_fail_closed -- --ignored --nocapture --test-threads=1
+          cargo test --manifest-path src-tauri/Cargo.toml --locked occupied_port_cannot_impersonate_owned_core -- --ignored --nocapture --test-threads=1
+          cargo test --manifest-path src-tauri/Cargo.toml --locked native_node_credentials_copy_edit_sync_and_reset_are_scoped -- --ignored --nocapture --test-threads=1

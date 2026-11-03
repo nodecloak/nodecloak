@@ -2,7 +2,7 @@
 fn main() {
     let args:Vec<String>=std::env::args().collect();
     if args.len()==2&&args[1]=="--nodecloak-proxy-core" {
-        if nodecloak_lib::run_proxy_core_stdio().is_err(){std::process::exit(1);}
+        if let Err(error)=nodecloak_lib::run_proxy_core_stdio(){eprintln!("{error}");std::process::exit(1);}
         return;
     }
     if nodecloak_lib::firefox_native_host::is_invocation(&args) {
