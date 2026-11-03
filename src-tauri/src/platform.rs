@@ -6,6 +6,8 @@ use std::{
 mod endpoint;
 #[cfg(any(test, target_os = "macos"))]
 mod singleton;
+#[cfg(any(test,target_os="macos"))]
+mod quit;
 
 pub fn command(program: &str) -> Command {
     let mut cmd = Command::new(program);
@@ -1144,9 +1146,9 @@ pub fn focus_profile(profile: &Path) -> Result<(), String> {
     Ok(())
 }
 pub fn close_profile(profile: &Path) -> Result<(), String> {
-    let ids = profile_process_ids(profile)?;
     #[cfg(windows)]
     {
+        let ids = profile_process_ids(profile)?;
         let state = (ids, true);
         unsafe {
             windows_sys::Win32::UI::WindowsAndMessaging::EnumWindows(
@@ -1156,27 +1158,38 @@ pub fn close_profile(profile: &Path) -> Result<(), String> {
         }
     }
     #[cfg(target_os = "macos")]
-    for pid in ids {
+    {
+    let closed=quit::wait(std::time::Duration::from_secs(8),||profile_process_ids(profile),|pid|{
         // SIGTERM does not reliably run Firefox's storage shutdown phases.
         // Address only this profile's main PID, never every app of that name.
         let script = format!("ObjC.import('AppKit'); const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier({pid}); let result='unregistered';if(!app.isNil()){{result='finishedLaunching='+app.finishedLaunching;if(!app.terminate) throw new Error('Browser refused normal quit');result+=';requested';}}result;");
         let quit = output("/usr/bin/osascript", &["-l", "JavaScript", "-e", &script]);
-        #[cfg(test)]
-        eprintln!("native normal quit pid={pid}: {quit:?}");
-        if let Err(error) = quit {
-            if profile_process_ids(profile)?.contains(&pid) {
-                return Err(error);
-            }
+        match quit {
+            Ok(status) => {
+                crate::browser_control::log_startup_endpoint(profile,"browser","normal_quit_request",&format!("pid={pid}; {status}"));
+                #[cfg(test)] eprintln!("native normal quit pid={pid}: {status}");
+                match status.as_str(){
+                    "unregistered"=>Ok(false),
+                    "finishedLaunching=true;requested"|"finishedLaunching=false;requested"=>Ok(true),
+                    _=>Err("无法确认浏览器正常退出请求是否已发送".into())
+                }
+            },
+            Err(error) if profile_process_ids(profile)?.contains(&pid)=>Err(error),
+            Err(_)=>Ok(true),
+        }
+    },||ensure_profile_closed(profile));
+    if let Err(error)=&closed {
+        crate::browser_control::log_startup_endpoint(profile,"browser","normal_quit_wait_failed",error);
+        #[cfg(test)] {
+            let ids=profile_process_ids(profile).unwrap_or_default();
+            eprintln!("native normal quit timeout main_ids={ids:?}");
+            if !ids.is_empty(){eprintln!("native normal quit remaining: {:?}",output("/bin/ps", &["-o","pid=,ppid=,stat=,comm=","-p",&ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",")]));}
         }
     }
-    let closed=wait_profile_closed(profile, std::time::Duration::from_secs(8));
-    #[cfg(all(test,target_os="macos"))]
-    if closed.is_err() {
-        let ids=profile_process_ids(profile).unwrap_or_default();
-        eprintln!("native normal quit timeout main_ids={ids:?}");
-        if !ids.is_empty(){eprintln!("native normal quit remaining: {:?}",output("/bin/ps", &["-o","pid=,ppid=,stat=,comm=","-p",&ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",")]));}
+    return closed;
     }
-    closed
+    #[cfg(not(target_os="macos"))]
+    wait_profile_closed(profile, std::time::Duration::from_secs(8))
 }
 
 pub(crate) fn wait_profile_closed(profile: &Path, timeout: std::time::Duration) -> Result<(), String> {
