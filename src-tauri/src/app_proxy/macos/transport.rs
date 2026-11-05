@@ -117,7 +117,7 @@ fn launch(suffix: &str, parent: u32, hash: &str) -> Result<Handle, String> {
     };
     #[cfg(not(test))]
     let mut command = {
-        let apple=format!("with timeout of 2147483647 seconds\n do shell script \"{}\" with administrator privileges\nend timeout",script.replace('\\',"\\\\").replace('"',"\\\"").replace('\n',"\\n"));
+        let apple = macos_support::applescript(&script);
         let mut c = Command::new("/usr/bin/osascript");
         c.args(["-e", &apple]);
         c

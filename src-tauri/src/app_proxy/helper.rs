@@ -2,6 +2,15 @@
 pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let _lifecycle = super::macos::security::Lifecycle::new(suffix)?;
+    let result = run_inner(suffix, parent).await;
+    #[cfg(target_os = "macos")]
+    if let Err(error) = &result {
+        eprintln!("NodeCloak application proxy: {error}");
+    }
+    result
+}
+#[cfg(any(windows, target_os = "macos"))]
+async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
     use super::{
         config,
         driver::{network, process, security::PrivateCore, transport},

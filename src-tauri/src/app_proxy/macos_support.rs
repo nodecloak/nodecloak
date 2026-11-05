@@ -138,6 +138,9 @@ pub fn preflight(
 fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
+pub fn applescript(script: &str) -> String {
+    format!("with timeout of 21474836 seconds\n do shell script \"{}\" with administrator privileges\nend timeout",script.replace('\\',"\\\\").replace('"',"\\\"").replace('\n',"\\n"))
+}
 pub fn check_network_now(
     monotonic: std::time::Duration,
     wall: Option<std::time::Duration>,
@@ -188,6 +191,8 @@ trap cleanup EXIT HUP INT TERM
 /bin/cp {source} "$d/helper"
 /bin/chmod 500 "$d/helper"
 /usr/bin/codesign --verify --strict -R {requirement} "$d/helper"
+: > "$d/helper.stderr"
+exec 5< "$d/helper.stderr"
 /bin/cat > "$d/job.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -211,7 +216,7 @@ while state=$(/bin/launchctl print system/{label} 2>/dev/null); do
     i=$((i+1)); test "$i" -lt 300; /bin/sleep 0.1
   fi
 done
-if test -f "$d/helper.stderr"; then /usr/bin/head -c 4096 "$d/helper.stderr" >&2; fi
+/usr/bin/head -c 4096 <&5 >&2
 "#,
         source = quote(executable)
     ))
