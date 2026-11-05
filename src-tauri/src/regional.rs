@@ -225,6 +225,7 @@ pub fn parse_ip_region(data: &Value) -> Result<IpRegion, String> {
         .ok_or("区域服务没有返回有效国家")?;
     let timezone = data["timezone"]["id"]
         .as_str()
+        .or_else(|| data["timezone"].as_str())
         .filter(|s| valid_timezone(s))
         .ok_or("区域服务没有返回有效时区，请使用自定义设置")?;
     let latitude = data["latitude"]
@@ -253,10 +254,19 @@ pub fn parse_ip_region(data: &Value) -> Result<IpRegion, String> {
 }
 pub const LOOKUP_URL: &str =
     "https://ipwho.is/?fields=success,ip,country_code,city,latitude,longitude,timezone.id";
-pub async fn lookup(up: Upstream) -> Result<IpRegion, String> {
-    let (client, _relay) = proxy::http_client(up).await?;
+// Some proxy exits block the primary lookup service. The fallback returns the
+// same fields (timezone as a string) and supports browser CORS.
+pub const LOOKUP_FALLBACK_URL: &str = "https://ipwhois.app/json/";
+pub fn lookup_urls(primary: &str) -> Vec<String> {
+    if primary == LOOKUP_URL {
+        vec![primary.to_owned(), LOOKUP_FALLBACK_URL.to_owned()]
+    } else {
+        vec![primary.to_owned()]
+    }
+}
+async fn lookup_one(client: &reqwest::Client, url: &str) -> Result<IpRegion, String> {
     let response = client
-        .get(LOOKUP_URL)
+        .get(url)
         .send()
         .await
         .map_err(|_| "无法通过此副本的网络路径匹配 IP 区域，请检查代理或使用自定义设置")?;
@@ -272,6 +282,17 @@ pub async fn lookup(up: Upstream) -> Result<IpRegion, String> {
         }
     }
     parse_ip_region(&serde_json::from_slice(&bytes).map_err(|_| "区域响应格式无效")?)
+}
+pub async fn lookup(up: Upstream) -> Result<IpRegion, String> {
+    let (client, _relay) = proxy::http_client(up).await?;
+    let mut last = String::new();
+    for url in lookup_urls(LOOKUP_URL) {
+        match lookup_one(&client, &url).await {
+            Ok(region) => return Ok(region),
+            Err(error) => last = error,
+        }
+    }
+    Err(if last.is_empty() { "无法通过此副本的网络路径匹配 IP 区域，请检查代理或使用自定义设置".into() } else { last })
 }
 /// Only used while the browser is still on about:blank. Target pages wait for resolve().
 pub fn initial(p: &Preferences) -> Result<ResolvedRegion, String> {
@@ -335,6 +356,28 @@ pub fn resolve(p: &Preferences, ip: Option<IpRegion>) -> Result<ResolvedRegion, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fallback_provider_schema_and_candidate_list_are_supported() {
+        let region = parse_ip_region(&serde_json::json!({
+            "success": true,
+            "ip": "203.0.113.12",
+            "country_code": "JP",
+            "city": "Tokyo",
+            "latitude": 35.68,
+            "longitude": 139.69,
+            "timezone": "Asia/Tokyo"
+        }))
+        .unwrap();
+        assert_eq!(region.timezone, "Asia/Tokyo");
+        assert_eq!(
+            lookup_urls(LOOKUP_URL),
+            vec![LOOKUP_URL.to_owned(), LOOKUP_FALLBACK_URL.to_owned()]
+        );
+        assert_eq!(
+            lookup_urls("https://example.test/region"),
+            vec!["https://example.test/region".to_owned()]
+        );
+    }
     #[test]
     fn firefox_manual_noise_uses_the_signed_companion_without_losing_regional_requests() {
         let mut p = Preferences::default();
