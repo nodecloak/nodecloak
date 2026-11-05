@@ -30,9 +30,9 @@
 
 **Interfaces:** `macos_bundle::executables(&Path) -> Result<Vec<String>, String>` expands an existing canonical bundle into bounded executable Mach-O paths. `config::compile_for(Platform, ...)` emits OS-specific TUN/routing configuration; `compile(...)` selects the current OS. Existing Windows tests explicitly retain the Windows compiler.
 
-- [ ] Add failing tests for distinct Codex/ChatGPT bundle identities, literal case-sensitive paths, nested helper paths, traversal/foreign-system targets and duplicate rules.
-- [ ] Implement bounded no-symlink bundle inspection and platform-specific path validation; retain Windows path/alias behavior.
-- [ ] Verify focused Rust tests and pinned-core configuration checks on both platforms.
+- [x] Add failing tests for distinct Codex/ChatGPT bundle identities, literal case-sensitive paths, nested helper paths, traversal/foreign-system targets and duplicate rules.
+- [x] Implement bounded non-following-symlink bundle inspection and platform-specific path validation; retain Windows path/alias behavior.
+- [x] Verify focused Rust tests and pinned-core configuration checks on both platforms.
 
 ## Task 2: Privileged Mac session and owned network lifecycle
 
@@ -40,28 +40,36 @@
 
 **Interfaces:** Mac `Session::start(StartRequest, state, cancel, settings, rules, root)` / `close()` mirror the Windows session. The root entry accepts only a UUID suffix, expected parent PID and validated code identity. `network::snapshot/preflight/released` never mutates existing routes. The controller stream uses the existing bounded IPC codec.
 
-- [ ] Add failing parser/bootstrap tests: shell metacharacters, invalid code identity, scoped Apple utun defaults, competing VPN defaults and colliding interface/subnet.
-- [ ] Implement root-owned verified executable copy, per-session transient launchd registration and exact cleanup, with no shell interpolation of settings or credentials.
-- [ ] Implement Unix audit-token authentication in both directions; reject incorrect UID/PID/code identity before reading secret configuration.
-- [ ] Run the embedded core from a fresh protected directory, stream configuration over stdin, and validate readiness against the expected utun index/address and authenticated controller.
-- [ ] Integrate cancellation, GUI EOF, graceful stop, core failure, helper crash ownership and network-change stop. Preserve diagnostic chronology and secret redaction.
+- [x] Add failing parser/bootstrap tests: shell metacharacters, invalid code identity, scoped Apple utun defaults, competing VPN defaults and colliding interface/subnet.
+- [x] Implement root-owned verified executable copy, per-session transient launchd registration and exact cleanup, with no shell interpolation of settings or credentials.
+- [x] Implement Unix audit-token authentication in both directions; reject incorrect UID/PID/code identity before reading secret configuration.
+- [x] Run the embedded core from a fresh protected directory, stream configuration over stdin, and validate readiness against the expected utun index/address and authenticated controller.
+- [x] Integrate cancellation, GUI EOF, graceful stop, core failure, helper crash ownership and network-change stop. Preserve diagnostic chronology and secret redaction.
 
 ## Task 3: Shared UI and documentation
 
 **Files:** `src/ApplicationProxy.tsx`, `src/ApplicationProxy.test.tsx`, `src/application-proxy.ts`, `src/i18n.ts`, `docs/application-proxy.md`, `README.md`.
 
-- [ ] Add a failing Mac view test asserting the feature can start, the selection/authorization copy is Mac-appropriate and no Windows-only restriction is shown.
-- [ ] Reuse the existing VI layout and controls; expose the platform in the view, support `.app` selection and display the app bundle name.
-- [ ] Describe authorization, stopping, supported protocols and application-helper/network-change limitations without package trust-status copy.
-- [ ] Run the frontend tests, type/build checks and link checks appropriate to changed docs.
+- [x] Add a failing Mac view test asserting the feature can start, the selection/authorization copy is Mac-appropriate and no Windows-only restriction is shown.
+- [x] Reuse the existing VI layout and controls; expose the platform in the view, support `.app` selection and display the app bundle name.
+- [x] Describe authorization, stopping, supported protocols and application-helper/network-change limitations without package trust-status copy.
+- [x] Run the frontend tests, type/build checks and link checks appropriate to changed docs.
 
 ## Task 4: Native gates and review
 
 **Files:** `app_proxy/macos/native_checks.rs`, `.github/workflows/application-proxy-checks.yml`, applicable build gates and private `.qa/macos-application-proxy/` evidence.
 
-- [ ] On disposable ARM64 and Intel macOS runners, validate both peers' live identities and reject a different executable/PID before sending configuration.
-- [ ] Exercise real TCP/UDP process routing, a same-name foreign process, nested helpers, normal Stop, GUI EOF, dead core, occupied controller, startup cancellation and helper SIGKILL.
-- [ ] Compare interfaces, routes, HTTP proxy and DNS before/after each teardown. Verify no root job or core process remains.
-- [ ] Verify the copied-helper path with a packaged application as well as the development/test executable.
-- [ ] Re-run unchanged Windows native gates and shared frontend/Rust suites.
-- [ ] Obtain independent security/correctness review, fix material findings, and record actual coverage and remaining real-app checks.
+- [x] On disposable ARM64 and Intel macOS runners, validate both peers' live identities and reject a different executable/PID before sending configuration.
+- [x] Exercise real TCP/UDP process routing, a same-name foreign process, nested helpers, normal Stop, GUI EOF, dead core, occupied controller, startup cancellation and helper SIGKILL.
+- [x] Compare interfaces, routes, HTTP proxy and DNS before/after each teardown. Verify no root job or core process remains.
+- [x] Verify the packaged application helper launch and the standalone development/test executable audit identity; keep the standalone full-session launch as an explicit coverage limit.
+- [x] Re-run unchanged Windows native gates and shared frontend/Rust suites.
+- [x] Obtain independent security/correctness review, fix material findings, and record actual coverage and remaining real-app checks.
+
+## Implementation clarifications
+
+- Real vendor layouts require a 64-level/100,000-entry traversal budget and up to 256 executable Mach-O paths per Mac rule (Windows remains at 32). The complete expanded IPC request is still limited to 1 MiB and checked before authorization.
+- The protected root copy preserves the complete application bundle. Internal symlinks are allowed; external/broken links are rejected before execution. Each inspected Mach-O is pinned by SHA256; absolute source-bundle load paths are rejected.
+- Self validity and the protected copy are checked strictly. Peer code identity uses audit-token-bound kernel CDHASH/status queries because an ordinary GUI cannot traverse the root-only copy. Both queries require the same PID generation; invalid/debugged/killed code is rejected.
+- Darwin rejects interface units above SHRT_MAX; session names use utun1024 through utun32767 and never adopt existing interfaces.
+- Slow discovery, bundle expansion and own-code inspection run as cancellable read-only preparation. Cancelled work cannot later create an authorization launcher.
