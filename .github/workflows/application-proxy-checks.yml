@@ -1,11 +1,40 @@
 name: Application proxy checks
 on:
   push:
-    branches: ['codex/application-proxy']
+    branches: ['codex/application-proxy', 'codex/macos-application-proxy']
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  macos-tun:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+      - run: npm ci
+      - run: node scripts/prepare-singbox.mjs
+      - run: npm test
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+      - name: Prepare native test program
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --no-run --message-format=json > native-tests.json
+      - name: Real Mac utun and owned launchd lifecycle
+        env:
+          NODECLOAK_ALLOW_MAC_TUN_TESTS: '1'
+        run: python3 scripts/check-macos-application-proxy.py native-tests.json
   windows-tun:
     runs-on: windows-latest
     timeout-minutes: 40

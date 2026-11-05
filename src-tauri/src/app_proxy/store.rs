@@ -69,7 +69,8 @@ pub fn validate(settings: &Settings) -> Result<(), String> {
             || !rules.insert(&rule.id)
             || !["codex", "chatgpt", "claude", "custom"].contains(&rule.app.as_str())
             || ((rule.app == "custom" || !rule.executable.is_empty())
-                && !super::config::valid_path(&rule.executable))
+                && !super::config::valid_path(&rule.executable)
+                && !super::macos_bundle::valid_selection(&rule.executable))
             || (rule.enabled && rule.proxy_id.is_none())
             || rule.proxy_id.as_ref().is_some_and(|id| !nodes.contains(id))
         {

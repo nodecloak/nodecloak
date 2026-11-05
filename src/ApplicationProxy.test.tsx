@@ -15,6 +15,14 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.resetAllMocks();});
 const button=(text:string)=>Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent?.includes(text));
+it('offers Mac application routing with Mac administrator consent rather than Windows instructions',async()=>{
+ Object.assign(view,{platform:'macos'});
+ await act(async()=>root.render(<ApplicationProxy/>));
+ expect(button('开启应用代理')!.disabled).toBe(false);
+ expect(host.textContent).toContain('macOS 管理员授权');
+ expect(host.textContent).not.toContain('Windows 管理员授权');
+ expect(host.textContent).not.toContain('仅支持 Windows');
+});
 it('opens inactive and never starts routing merely by mounting the page',async()=>{
  await act(async()=>root.render(<ApplicationProxy/>));
  expect(button('开启应用代理')).toBeDefined();expect(host.textContent).toContain('未开启');
@@ -32,7 +40,7 @@ it('cancelled administrator authorization retains off state and an actionable er
 });
 it('unsupported platforms never offer an enabled start control',async()=>{
  view.supported=false;await act(async()=>root.render(<ApplicationProxy/>));
- expect(host.textContent).toContain('仅支持 Windows');expect(button('开启应用代理')!.disabled).toBe(true);
+ expect(host.textContent).toContain('当前系统仍可使用浏览器副本代理');expect(button('开启应用代理')!.disabled).toBe(true);
 });
 it('dismisses a persisted runtime error without changing routing state',async()=>{
  view.runtime.phase='error';view.runtime.error='启动已取消';await act(async()=>root.render(<ApplicationProxy/>));

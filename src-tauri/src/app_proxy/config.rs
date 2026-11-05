@@ -5,11 +5,34 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 
 pub const INTERFACE_PREFIX: &str = "NCApps-";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Platform {
+    Windows,
+    Macos,
+}
+impl Platform {
+    pub fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Macos
+        } else {
+            Self::Windows
+        }
+    }
+}
 pub fn valid_id(id: &str) -> bool {
     uuid::Uuid::parse_str(id).is_ok()
 }
 pub fn interface_name(session: &str) -> Result<String, String> {
+    interface_name_for(Platform::current(), session)
+}
+pub fn interface_name_for(platform: Platform, session: &str) -> Result<String, String> {
     let id = uuid::Uuid::parse_str(session).map_err(|_| "应用代理会话标识无效")?;
+    if platform == Platform::Macos {
+        return Ok(format!(
+            "utun{}",
+            1024 + u16::from_be_bytes([id.as_bytes()[0], id.as_bytes()[1]]) as u32
+        ));
+    }
     Ok(format!(
         "{INTERFACE_PREFIX}{}",
         &id.simple().to_string()[..8]
@@ -68,7 +91,7 @@ pub fn exact_pattern(path: &str) -> String {
 }
 fn raw_exact_pattern(path: &str) -> String {
     let normalized = normalize(path);
-    let mut pattern = String::from("(?i)^");
+    let mut pattern = String::from(if path.starts_with('/') { "^" } else { "(?i)^" });
     for c in normalized.chars() {
         if "\\.+*?()[]{}^$|".contains(c) {
             pattern.push('\\');
@@ -140,6 +163,9 @@ fn path_patterns(path: &str, exact: bool) -> Vec<String> {
     patterns
 }
 pub fn valid_path(path: &str) -> bool {
+    if path.starts_with('/') {
+        return super::macos_bundle::valid_executable_path(path);
+    }
     let path = normalize(path);
     path.as_bytes().get(1) == Some(&b':')
         && path.as_bytes().get(2) == Some(&b'\\')
@@ -166,6 +192,16 @@ pub fn valid_path(path: &str) -> bool {
             .is_some_and(|current| current == path)
 }
 pub fn compile(
+    rules: &[ResolvedRule],
+    proxies: &[ResolvedProxy],
+    port: u16,
+    secret: &str,
+    session: &str,
+) -> Result<Value, String> {
+    compile_for(Platform::current(), rules, proxies, port, secret, session)
+}
+pub fn compile_for(
+    platform: Platform,
     rules: &[ResolvedRule],
     proxies: &[ResolvedProxy],
     port: u16,
@@ -253,7 +289,10 @@ pub fn compile(
         let mut paths = vec![];
         let mut local = HashSet::new();
         for path in &rule.paths {
-            if !valid_path(path) || !valid_path(&super::discovery::canonical_executable(path)) {
+            if (platform == Platform::Macos) != path.starts_with('/')
+                || !valid_path(path)
+                || !valid_path(&super::discovery::canonical_executable(path))
+            {
                 return Err("请选择本机应用程序；系统及共享网络进程不能作为代理目标".into());
             }
             let pattern = if rule.exact_paths {
@@ -276,7 +315,7 @@ pub fn compile(
     }
     Ok(json!({"log":{"level":"info","timestamp":false},
         "dns":{"servers":[{"type":"local","tag":"bootstrap"}]},
-        "inbounds":[{"type":"tun","tag":"applications","interface_name":interface_name(session)?,"address":["172.29.255.1/30","fd64:6e6f:6465::1/126"],"mtu":1500,"auto_route":true,"strict_route":false,"dns_mode":"disabled","stack":"mixed"}],
+        "inbounds":[{"type":"tun","tag":"applications","interface_name":interface_name_for(platform,session)?,"address":["172.29.255.1/30","fd64:6e6f:6465::1/126"],"mtu":1500,"auto_route":true,"strict_route":false,"dns_mode":"disabled","stack":"mixed"}],
         "outbounds":outbounds,"route":{"auto_detect_interface":true,"find_process":true,"default_domain_resolver":"bootstrap","rules":routing,"final":"direct"},
         "experimental":{"clash_api":{"external_controller":format!("127.0.0.1:{port}"),"secret":secret,"access_control_allow_origin":["http://nodecloak.invalid"],"access_control_allow_private_network":false}}
     }))

@@ -1,8 +1,50 @@
-use super::{config, discovery, model::*};
+use super::{discovery, model::*};
+mod config {
+    pub use super::super::config::*;
+    pub fn compile(
+        rules: &[super::ResolvedRule],
+        proxies: &[super::ResolvedProxy],
+        port: u16,
+        secret: &str,
+        session: &str,
+    ) -> Result<serde_json::Value, String> {
+        compile_for(Platform::Windows, rules, proxies, port, secret, session)
+    }
+}
 use crate::proxy::ProxyConfig;
 use serde_json::json;
 
 const ID: &str = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";
+#[test]
+fn mac_paths_preserve_case_and_slashes_for_process_identity() {
+    let path = "/Applications/Codex.app/Contents/MacOS/Codex";
+    assert_eq!(discovery::normalize(path), path);
+    assert_eq!(
+        config::exact_pattern(path),
+        r"^/Applications/Codex\.app/Contents/MacOS/Codex$"
+    );
+    assert_ne!(
+        config::exact_pattern(path),
+        config::exact_pattern(&path.to_lowercase())
+    );
+}
+#[test]
+fn mac_targets_are_application_executables_and_never_shared_system_hosts() {
+    assert!(config::valid_path(
+        "/Applications/Claude.app/Contents/MacOS/Claude"
+    ));
+    assert!(config::valid_path("/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"));
+    for path in [
+        "/usr/bin/python3",
+        "/bin/sh",
+        "/Applications/../bin/sh",
+        "/Applications/NodeCloak.app/Contents/MacOS/nodecloak",
+        "/Applications/Example.app/../other",
+        "/Applications/Example.app/Contents/MacOS/sing-box",
+    ] {
+        assert!(!config::valid_path(path), "unsafe target: {path}");
+    }
+}
 fn proxy() -> ResolvedProxy {
     ResolvedProxy {
         id: ID.into(),

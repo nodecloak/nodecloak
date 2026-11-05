@@ -32,8 +32,8 @@ pub async fn application_proxy_action(
         return serde_json::to_value(runtime.view(&root)?)
             .map_err(|_| "无法读取应用代理状态".into());
     }
-    if !cfg!(windows) {
-        return Err("应用代理当前仅支持 Windows".into());
+    if !cfg!(any(windows, target_os = "macos")) {
+        return Err("应用代理支持 Windows 和 macOS".into());
     }
     match action.as_str() {
         "discover" => runtime.discover().await?,
@@ -63,9 +63,13 @@ pub async fn application_proxy_action(
             runtime.editable()?;
             use tauri_plugin_dialog::DialogExt;
             return tokio::task::spawn_blocking(move || {
-                let path = app
-                    .dialog()
-                    .file()
+                let dialog = app.dialog().file();
+                #[cfg(target_os = "macos")]
+                let path = dialog
+                    .add_filter("Mac application", &["app"])
+                    .blocking_pick_file();
+                #[cfg(not(target_os = "macos"))]
+                let path = dialog
                     .add_filter("Windows application", &["exe"])
                     .blocking_pick_file();
                 let Some(path) = path else {
@@ -81,7 +85,12 @@ pub async fn application_proxy_action(
                     .strip_prefix(r"\\?\")
                     .unwrap_or(&path.to_string_lossy())
                     .to_owned();
-                if !super::config::valid_path(&path) {
+                if cfg!(target_os = "macos") {
+                    if !super::macos_bundle::valid_selection(&path) {
+                        return Err("请选择 Mac 应用（.app）".into());
+                    }
+                    super::macos_bundle::executables(std::path::Path::new(&path))?;
+                } else if !super::config::valid_path(&path) {
                     return Err(
                         "请选择本机应用程序；不能选择 NodeCloak、代理内核或系统共享进程".into(),
                     );

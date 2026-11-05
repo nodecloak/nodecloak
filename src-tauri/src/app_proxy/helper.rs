@@ -1,9 +1,9 @@
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
     use super::{
         config,
+        driver::{network, process, security::PrivateCore, transport},
         ipc::{self, Control, Reply, StartRequest},
-        windows::{network, process, security::PrivateCore, transport},
     };
     use std::{
         sync::{
@@ -60,6 +60,8 @@ pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
     }
     let _reader = Reader(control);
     let worker_cancel = cancel.clone();
+    #[cfg(target_os = "macos")]
+    let original_network = network::signature()?;
     let worker_interface = interface.clone();
     let mut secrets: Vec<String> = request
         .proxies
@@ -101,7 +103,7 @@ pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
             {
                 luid = network::owned_luid(&interface)?.or(luid);
                 if signal.ready.load(Ordering::Acquire) {
-                    luid = network::interface_luid(&interface)?;
+                    luid = network::owned_luid(&interface)?;
                     if luid.is_some()
                         && client
                             .get(format!(
@@ -142,7 +144,18 @@ pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
                     });
                 return Err(error);
             }
+            #[cfg(target_os = "macos")]
+            let mut last_network_check = std::time::SystemTime::now();
             while !cancel.load(Ordering::Acquire) && parent_handle.alive() && core.alive() {
+                #[cfg(target_os = "macos")]
+                if last_network_check.elapsed().unwrap_or_default() >= Duration::from_secs(2) {
+                    if last_network_check.elapsed().unwrap_or_default() > Duration::from_secs(15)
+                        || !network::unchanged(&original_network, &interface)?
+                    {
+                        return Err("网络连接已变化或系统已唤醒，应用代理已停止；请重新开启".into());
+                    }
+                    last_network_check = std::time::SystemTime::now();
+                }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             let unexpected = !cancel.load(Ordering::Acquire) && parent_handle.alive();
@@ -190,11 +203,11 @@ pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
     }
     result
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn wait_released(interface: &str, luid: Option<u64>) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
-        if super::windows::network::session_released(interface, luid)? {
+        if super::driver::network::session_released(interface, luid)? {
             return Ok(());
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;

@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 /// and file aliases before matching so selecting an existing executable cannot
 /// silently become a direct connection merely because TEMP used an 8.3 path.
 pub fn canonical_executable(path: &str) -> String {
-    #[cfg(windows)]
     if let Ok(file) = std::fs::canonicalize(path) {
         let value = file.to_string_lossy();
         return value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned();
@@ -14,12 +13,18 @@ pub fn canonical_executable(path: &str) -> String {
 }
 
 pub fn normalize(path: &str) -> String {
+    if path.starts_with('/') {
+        return path.to_owned();
+    }
     path.strip_prefix(r"\\?\")
         .unwrap_or(path)
         .replace('/', "\\")
         .to_lowercase()
 }
 pub fn identify(path: &str) -> Option<&'static str> {
+    if path.starts_with('/') {
+        return super::macos_bundle::identify(path);
+    }
     let path = normalize(path);
     if path.as_bytes().get(1) == Some(&b':')
         && path
@@ -86,6 +91,8 @@ pub fn empty_apps() -> Vec<DetectedApp> {
 }
 pub fn discover() -> Result<Vec<DetectedApp>, String> {
     let mut apps = empty_apps();
+    #[cfg(target_os = "macos")]
+    super::macos_bundle::discover(&mut apps)?;
     #[cfg(windows)]
     {
         use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};

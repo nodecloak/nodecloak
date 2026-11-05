@@ -1,6 +1,6 @@
 use super::{
     process,
-    security::{self, Descriptor, Handle},
+    security::{self, Descriptor},
 };
 use crate::app_proxy::ipc::{self, Hello};
 use std::{os::windows::io::AsRawHandle, time::Duration};
@@ -8,6 +8,8 @@ use tokio::net::windows::named_pipe::{
     ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
 };
 use windows_sys::Win32::System::Pipes::*;
+pub type Server = NamedPipeServer;
+pub use super::security::Handle;
 
 pub fn name(suffix: &str) -> Result<String, String> {
     let id = uuid::Uuid::parse_str(suffix).map_err(|_| "应用代理通道标识无效")?;
