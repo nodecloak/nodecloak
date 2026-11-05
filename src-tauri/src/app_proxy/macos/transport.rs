@@ -102,12 +102,14 @@ pub fn directory(suffix: &str) -> Result<PathBuf, String> {
 }
 fn launch(suffix: &str, parent: u32, hash: &str) -> Result<Handle, String> {
     let exe = std::env::current_exe().map_err(|_| "无法定位应用代理程序")?;
+    let manifest = crate::app_proxy::macos_loader::inspect(&exe)?;
     let script = macos_support::bootstrap(
         exe.to_str().ok_or("应用代理路径无效")?,
         suffix,
         parent,
         hash,
         cfg!(test),
+        &manifest,
     )?;
     #[cfg(test)]
     let mut command = {

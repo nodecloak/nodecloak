@@ -157,6 +157,7 @@ pub fn bootstrap(
     parent: u32,
     hash: &str,
     test: bool,
+    manifest: &[(String, String)],
 ) -> Result<String, String> {
     if !executable.starts_with('/')
         || executable.chars().any(char::is_control)
@@ -177,6 +178,51 @@ pub fn bootstrap(
         format!("<string>--nodecloak-app-proxy</string><string>{suffix}</string><string>{parent}</string>")
     };
     let requirement = quote(&format!("=cdhash H\"{hash}\""));
+    let bundle = executable.rsplit_once(".app/");
+    let mut hashes = String::new();
+    if manifest.is_empty() || manifest.len() > 256 {
+        return Err("应用代理校验清单无效".into());
+    }
+    for (path, hash) in manifest {
+        if hash.len() != 64
+            || !hash.bytes().all(|b| b.is_ascii_hexdigit())
+            || path.chars().any(char::is_control)
+            || path.starts_with('/')
+            || path.contains('\\')
+            || path
+                .split('/')
+                .any(|p| p.is_empty() || p == "." || p == "..")
+            || if bundle.is_some() {
+                !path.starts_with("Application.app/")
+            } else {
+                path != "helper"
+            }
+        {
+            return Err("应用代理校验清单无效".into());
+        }
+        hashes.push_str(&format!("actual=$(/usr/bin/shasum -a 256 < \"$d\"/{})\ncase \"$actual\" in {hash}'  -') ;; *) /usr/bin/printf '%s\\n' 'Application proxy program changed during authorization' >&2; exit 1 ;; esac\n",quote(path)));
+    }
+    if hashes.len() > 100_000 {
+        return Err("应用代理校验清单超过限制".into());
+    }
+    let symlinks = r#"root=$1
+for link in "$root"/**/*(DN@); do
+  resolved=${link:A}
+  [[ "$resolved" == "$root/"* && -e "$resolved" ]] || exit 1
+done"#;
+    let prepare = if let Some((bundle, tail)) = bundle {
+        if !tail.starts_with("Contents/MacOS/")
+            || tail.split('/').count() != 3
+            || !tail
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+        {
+            return Err("应用代理程序在应用包中的位置无效".into());
+        }
+        format!("/usr/bin/ditto --noqtn --noextattr {} \"$d/Application.app\"\n/usr/sbin/chown -Rh -P 0:0 \"$d/Application.app\"\n/bin/zsh -f -c {} -- \"$d/Application.app\"\n{hashes}/usr/bin/codesign --verify --strict --deep \"$d/Application.app\"\n/usr/bin/codesign --verify --strict -R {requirement} \"$d/Application.app\"\nprogram=\"$d/Application.app/{tail}\"",quote(&format!("{bundle}.app")),quote(symlinks))
+    } else {
+        format!("/bin/cp {} \"$d/helper\"\n/bin/chmod 500 \"$d/helper\"\n{hashes}/usr/bin/codesign --verify --strict -R {requirement} \"$d/helper\"\nprogram=\"$d/helper\"",quote(executable))
+    };
     Ok(format!(
         r#"set -eu
 umask 077
@@ -185,12 +231,11 @@ cleanup() {{
   trap - EXIT HUP INT TERM
   /bin/launchctl bootout system/{label} >/dev/null 2>&1 || :
   /bin/rm -f "$d/helper" "$d/sing-box" "$d/job.plist" "$d/helper.stderr"
+  case "$d" in /private/var/run/nodecloak-ap.????????) /bin/rm -rf -- "$d/Application.app" ;; *) exit 1 ;; esac
   if test -d "$d"; then /bin/rmdir "$d"; fi
 }}
 trap cleanup EXIT HUP INT TERM
-/bin/cp {source} "$d/helper"
-/bin/chmod 500 "$d/helper"
-/usr/bin/codesign --verify --strict -R {requirement} "$d/helper"
+{prepare}
 : > "$d/helper.stderr"
 exec 5< "$d/helper.stderr"
 /bin/cat > "$d/job.plist" <<PLIST
@@ -198,7 +243,7 @@ exec 5< "$d/helper.stderr"
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>{label}</string>
-<key>ProgramArguments</key><array><string>$d/helper</string>{arguments}</array>
+<key>ProgramArguments</key><array><string>$program</string>{arguments}</array>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string><key>NC_AP_TEST_SUFFIX</key><string>{suffix}</string><key>NC_AP_TEST_PARENT</key><string>{parent}</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><false/>
 <key>StandardErrorPath</key><string>$d/helper.stderr</string>
@@ -218,7 +263,6 @@ while state=$(/bin/launchctl print system/{label} 2>/dev/null); do
 done
 /usr/bin/head -c 4096 <&5 >&2
 "#,
-        source = quote(executable)
     ))
 }
 #[cfg(test)]
@@ -255,6 +299,7 @@ mod checks {
             123,
             &"a".repeat(40),
             false,
+            &[("Application.app/Contents/MacOS/app".into(), "b".repeat(64))],
         )
         .unwrap();
         assert!(s.contains("O'\\''Brian $(whoami)"));
@@ -263,15 +308,25 @@ mod checks {
                 < s.find("launchctl bootstrap").unwrap()
         );
         assert!(s.contains("<key>AbandonProcessGroup</key><false/>"));
-        assert!(!s.contains("rm -r"));
+        assert!(s.contains("case \"$d\" in /private/var/run/nodecloak-ap.????????) /bin/rm -rf -- \"$d/Application.app\""));
+        assert!(s.contains("/usr/bin/ditto --noqtn --noextattr"));
         assert!(!s.contains("setpgid"));
-        assert!(bootstrap("/tmp/host", "bad", 123, &"a".repeat(40), false).is_err());
+        assert!(bootstrap(
+            "/tmp/host",
+            "bad",
+            123,
+            &"a".repeat(40),
+            false,
+            &[("helper".into(), "b".repeat(64))]
+        )
+        .is_err());
         assert!(bootstrap(
             "/tmp/host",
             "0b4fcb93-ec83-4f9b-996a-f89f7aa96025",
             123,
             "bad'",
-            false
+            false,
+            &[("helper".into(), "b".repeat(64))]
         )
         .is_err());
     }

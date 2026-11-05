@@ -60,16 +60,26 @@ pub fn identify(path: &str) -> Option<&'static str> {
         None
     }
 }
-fn product(bundle: &str, identifier: &str) -> Option<&'static str> {
-    match (bundle, identifier) {
-        ("Codex.app", "com.openai.codex") => Some("codex"),
-        ("ChatGPT.app", "com.openai.chat") => Some("chatgpt"),
-        ("Claude.app", "com.anthropic.claudefordesktop") => Some("claude"),
+fn publisher(identifier: &str) -> Option<&'static str> {
+    match identifier {
+        "com.openai.codex" | "com.openai.chat" => Some("2DC432GLL2"),
+        "com.anthropic.claudefordesktop" => Some("Q6L2SF6YDW"),
+        _ => None,
+    }
+}
+fn product(_bundle: &str, identifier: &str, team: &str) -> Option<&'static str> {
+    if publisher(identifier) != Some(team) {
+        return None;
+    }
+    match identifier {
+        "com.openai.codex" => Some("codex"),
+        "com.openai.chat" => Some("chatgpt"),
+        "com.anthropic.claudefordesktop" => Some("claude"),
         _ => None,
     }
 }
 #[cfg(target_os = "macos")]
-fn bundle_product(bundle: &Path) -> Option<&'static str> {
+pub(super) fn bundle_product(bundle: &Path) -> Option<&'static str> {
     use std::process::{Command, Stdio};
     let output = Command::new("/usr/libexec/PlistBuddy")
         .args(["-c", "Print :CFBundleIdentifier"])
@@ -81,8 +91,9 @@ fn bundle_product(bundle: &Path) -> Option<&'static str> {
         return None;
     }
     let id = std::str::from_utf8(&output.stdout).ok()?.trim();
-    let product = product(bundle.file_name()?.to_str()?, id)?;
-    let requirement = format!("=anchor apple generic and identifier \"{id}\"");
+    let team = publisher(id)?;
+    let product = product(bundle.file_name()?.to_str()?, id, team)?;
+    let requirement = format!("=anchor apple generic and identifier \"{id}\" and certificate leaf[subject.OU] = \"{team}\"");
     Command::new("/usr/bin/codesign")
         .args(["--verify", "--strict", "-R", &requirement])
         .arg(bundle)
@@ -271,16 +282,13 @@ pub fn discover(apps: &mut [super::discovery::DetectedApp]) -> Result<(), String
         ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
     );
     for app in apps {
-        let mut bundles = vec![std::path::PathBuf::from(format!(
-            "/Applications/{}.app",
-            app.name
-        ))];
+        // Product identity comes from the bundle, not its display name. Some
+        // Codex builds use ChatGPT.app as their on-disk name.
+        let mut bundles:Vec<_> = ["Codex","ChatGPT","Claude"].iter().map(|name|std::path::PathBuf::from(format!("/Applications/{name}.app"))).collect();
         if let Some(home) = std::env::var_os("HOME") {
-            bundles.push(
-                std::path::PathBuf::from(home)
-                    .join("Applications")
-                    .join(format!("{}.app", app.name)),
-            );
+            for name in ["Codex","ChatGPT","Claude"] {
+                bundles.push(std::path::PathBuf::from(&home).join("Applications").join(format!("{name}.app")));
+            }
         }
         for process in system.processes().values() {
             if let Some(path) = process
@@ -324,10 +332,16 @@ mod checks {
     use super::*;
     #[test]
     fn renamed_apps_do_not_become_codex_or_chatgpt() {
-        assert_eq!(product("Codex.app", "com.other.vendor"), None);
-        assert_eq!(product("Codex.app", "com.openai.chat"), None);
-        assert_eq!(product("Codex.app", "com.openai.codex"), Some("codex"));
-        assert_eq!(product("ChatGPT.app", "com.openai.chat"), Some("chatgpt"));
+        assert_eq!(product("Codex.app", "com.other.vendor", "2DC432GLL2"), None);
+        assert_eq!(product("Codex.app", "com.openai.codex", "FOREIGN123"), None);
+        assert_eq!(
+            product("Codex.app", "com.openai.codex", "2DC432GLL2"),
+            Some("codex")
+        );
+        assert_eq!(
+            product("ChatGPT.app", "com.openai.chat", "2DC432GLL2"),
+            Some("chatgpt")
+        );
     }
     fn image(file: &Path, kind: u32) {
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();

@@ -13,7 +13,14 @@ pub fn directory() -> Result<PathBuf, String> {
         .map_err(|_| "无法定位应用代理辅助程序")?
         .canonicalize()
         .map_err(|_| "无法读取应用代理辅助程序")?;
-    let dir = executable.parent().ok_or("应用代理辅助程序目录无效")?;
+    let dir = executable
+        .ancestors()
+        .find(|p| {
+            p.parent() == Some(std::path::Path::new("/private/var/run"))
+                && p.file_name()
+                    .is_some_and(|s| s.to_string_lossy().starts_with("nodecloak-ap."))
+        })
+        .ok_or("应用代理辅助程序目录无效")?;
     let m = std::fs::symlink_metadata(dir).map_err(|_| "无法检查应用代理目录")?;
     if unsafe { libc::geteuid() } != 0
         || dir.parent() != Some(std::path::Path::new("/private/var/run"))
@@ -48,6 +55,12 @@ impl Drop for Lifecycle {
     fn drop(&mut self) {
         for name in ["sing-box", "helper", "job.plist", "helper.stderr"] {
             let _ = std::fs::remove_file(self.directory.join(name));
+        }
+        let application = self.directory.join("Application.app");
+        if std::fs::symlink_metadata(&application).is_ok_and(|m| m.file_type().is_symlink()) {
+            let _ = std::fs::remove_file(application);
+        } else {
+            let _ = std::fs::remove_dir_all(application);
         }
         let _ = std::fs::remove_dir(&self.directory);
         // Core teardown has already completed. launchd may terminate this job

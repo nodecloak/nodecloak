@@ -29,11 +29,13 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin nodecloak
       - name: Prepare native test program
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --no-run --message-format=json > native-tests.json
       - name: Real Mac utun and owned launchd lifecycle
         env:
           NODECLOAK_ALLOW_MAC_TUN_TESTS: '1'
+          NODECLOAK_VERIFY_VENDOR_LAYOUTS: ${{ matrix.os == 'macos-15' && '1' || '0' }}
         run: python3 scripts/check-macos-application-proxy.py native-tests.json
   windows-tun:
     runs-on: windows-latest

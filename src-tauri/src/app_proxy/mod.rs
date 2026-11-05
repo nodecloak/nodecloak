@@ -9,6 +9,8 @@ mod ipc;
 mod macos;
 mod macos_bundle;
 #[cfg(any(target_os = "macos", test))]
+mod macos_loader;
+#[cfg(any(target_os = "macos", test))]
 mod macos_support;
 mod model;
 #[cfg(target_os = "macos")]

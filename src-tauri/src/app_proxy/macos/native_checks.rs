@@ -7,6 +7,23 @@ use crate::app_proxy::{
 };
 use std::{process::Command, sync::atomic::Ordering, time::Duration};
 const ID: &str = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";
+#[test]
+#[ignore = "Read-only inspection of an official vendor DMG on disposable CI"]
+fn native_macos_vendor_bundle_layout() {
+    let bundle = std::path::PathBuf::from(std::env::var_os("NODECLOAK_MAC_VENDOR_BUNDLE").unwrap());
+    let product = crate::app_proxy::macos_bundle::bundle_product(&bundle)
+        .expect("official bundle identity must be recognized");
+    let paths = crate::app_proxy::macos_bundle::executables(&bundle).unwrap();
+    assert!(!paths.is_empty());
+    println!(
+        "Official {product}: {} executable paths, including actual helpers",
+        paths.len()
+    );
+    for path in &paths {
+        assert!(crate::app_proxy::config::valid_path(path));
+        assert!(std::path::Path::new(path).starts_with(&bundle));
+    }
+}
 #[tokio::test]
 #[ignore = "Entry point only for the authenticated root launchd fixture"]
 async fn root_entry() {

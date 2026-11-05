@@ -11,12 +11,18 @@ program = pathlib.Path(programs[0]).resolve()
 subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(program)], check=True)
 subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(program)], check=True)
 subprocess.run([str(program), 'local_audit_tokens_reject_a_different_executable_before_config', '--ignored', '--nocapture', '--test-threads=1'], check=True, timeout=60)
+if os.environ.get('NODECLOAK_VERIFY_VENDOR_LAYOUTS') == '1':
+    subprocess.run([sys.executable,'scripts/check-macos-vendor-layouts.py',str(program)],check=True,timeout=900)
 with tempfile.TemporaryDirectory(prefix='nodecloak-native-package-') as temporary:
     bundle = pathlib.Path(temporary).resolve() / 'NodeCloak Native Checks.app'
     executable = bundle / 'Contents/MacOS/native-checks'
     executable.parent.mkdir(parents=True)
     shutil.copy2(program, executable)
     (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':'com.nodecloak.native-checks','CFBundleExecutable':'native-checks','CFBundlePackageType':'APPL','CFBundleVersion':'1'}))
+    nested = bundle / 'Contents/Helpers/tool'
+    nested.parent.mkdir()
+    shutil.copy2('/usr/bin/true',nested)
+    subprocess.run(['/usr/bin/codesign','--force','--sign','-',str(nested)],check=True)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(bundle)], check=True)
     subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(bundle)], check=True)
     for check in ['local_audit_tokens_reject_a_different_executable_before_config', 'native_macos_application_proxy_routes_and_recovers_owned_network']:
