@@ -1,5 +1,6 @@
 //! Exact bundle membership; never match all processes merely by their basename.
 use std::path::{Component, Path};
+pub const MAX_EXECUTABLES: usize = 256;
 pub fn valid_selection(path: &str) -> bool {
     path.starts_with('/')
         && path.len() <= 2048
@@ -262,8 +263,8 @@ pub fn executables(selection: &Path) -> Result<Vec<String>, String> {
                 continue;
             }
             result.push(value.to_owned());
-            if result.len() > 32 {
-                return Err("应用包含的可执行程序超过 32 个，请选择实际程序文件".into());
+            if result.len() > MAX_EXECUTABLES {
+                return Err("应用包含的可执行程序超过 256 个，请选择实际程序文件".into());
             }
         }
     }
@@ -283,12 +284,12 @@ pub fn discover(apps: &mut [super::discovery::DetectedApp]) -> Result<(), String
         true,
         ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
     );
-    let mut bundles: Vec<_> = ["Codex", "ChatGPT", "Claude"]
+    let mut bundles: Vec<_> = ["Codex", "ChatGPT", "ChatGPT Classic", "Claude"]
         .iter()
         .map(|name| std::path::PathBuf::from(format!("/Applications/{name}.app")))
         .collect();
     if let Some(home) = std::env::var_os("HOME") {
-        for name in ["Codex", "ChatGPT", "Claude"] {
+        for name in ["Codex", "ChatGPT", "ChatGPT Classic", "Claude"] {
             bundles.push(
                 std::path::PathBuf::from(&home)
                     .join("Applications")
@@ -319,6 +320,13 @@ pub fn discover(apps: &mut [super::discovery::DetectedApp]) -> Result<(), String
         .filter_map(|bundle| bundle_product(&bundle).map(|id| (id, bundle)))
         .collect();
     for app in apps {
+        if app.id == "codex"
+            && found
+                .iter()
+                .any(|(id, b)| *id == "codex" && b.file_name().is_some_and(|n| n == "ChatGPT.app"))
+        {
+            app.name = "Codex / ChatGPT".into();
+        }
         for (_, bundle) in found.iter().filter(|(id, _)| *id == app.id) {
             app.paths.extend(executables(bundle)?);
         }

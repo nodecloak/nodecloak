@@ -5,6 +5,7 @@ assert sys.platform == 'darwin' and os.environ.get('CI') == 'true'
 program = pathlib.Path(sys.argv[1]).resolve()
 sources = [
     ('openai', 'https://persistent.oaistatic.com/codex-app-prod/Codex.dmg', '2DC432GLL2'),
+    ('openai-classic', 'https://persistent.oaistatic.com/sidekick/public/ChatGPT_Desktop_public_latest.dmg', '2DC432GLL2'),
     ('anthropic', 'https://claude.ai/api/desktop/darwin/universal/dmg/latest/redirect', 'Q6L2SF6YDW'),
 ]
 report = []

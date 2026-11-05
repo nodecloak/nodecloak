@@ -39,6 +39,11 @@ pub fn interface_name_for(platform: Platform, session: &str) -> Result<String, S
     ))
 }
 pub fn path_pattern(path: &str) -> String {
+    // Mac paths are always literal. Version-directory expansion below is
+    // Windows-only; do not re-inspect a Mac bundle for every helper path.
+    if path.starts_with('/') {
+        return exact_pattern(path);
+    }
     fn escaped(value: &str) -> String {
         let mut out = String::new();
         for c in value.chars() {
@@ -282,7 +287,12 @@ pub fn compile_for(
             || !rule_ids.insert(&rule.id)
             || !ids.contains(&rule.proxy_id)
             || rule.paths.is_empty()
-            || rule.paths.len() > 32
+            || rule.paths.len()
+                > if platform == Platform::Macos {
+                    super::macos_bundle::MAX_EXECUTABLES
+                } else {
+                    32
+                }
         {
             return Err("应用代理规则无效或没有找到可执行程序".into());
         }

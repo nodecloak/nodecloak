@@ -175,7 +175,7 @@ impl Runtime {
         #[cfg(not(any(windows, target_os = "macos")))]
         {
             let _ = root;
-            return Err("应用代理当前仅支持 Windows".into());
+            return Err("应用代理支持 Windows 和 macOS".into());
         }
         #[cfg(any(windows, target_os = "macos"))]
         {

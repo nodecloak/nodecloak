@@ -10,9 +10,15 @@ assert len(programs) == 1, programs
 program = pathlib.Path(programs[0]).resolve()
 subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(program)], check=True)
 subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(program)], check=True)
+core_arch='arm64' if platform.machine()=='arm64' else 'x64'
+env=dict(os.environ,NODECLOAK_TEST_SINGBOX=str(pathlib.Path(f'.tools/singbox/darwin-{core_arch}/sing-box').resolve()))
+subprocess.run([str(program),'installed_core_accepts_application_configs_without_network_changes','--ignored','--nocapture','--test-threads=1'],check=True,timeout=60,env=env)
 subprocess.run([str(program), 'local_audit_tokens_reject_a_different_executable_before_config', '--ignored', '--nocapture', '--test-threads=1'], check=True, timeout=60)
+vendor_result = None
 if os.environ.get('NODECLOAK_VERIFY_VENDOR_LAYOUTS') == '1':
-    subprocess.run([sys.executable,'scripts/check-macos-vendor-layouts.py',str(program)],check=True,timeout=900)
+    # Independent read-only evidence must not prevent the routing diagnostics.
+    # Preserve the failure and fail the gate after both sets have run.
+    vendor_result = subprocess.run([sys.executable,'scripts/check-macos-vendor-layouts.py',str(program)],timeout=900)
 with tempfile.TemporaryDirectory(prefix='nodecloak-native-package-') as temporary:
     bundle = pathlib.Path(temporary).resolve() / 'NodeCloak Native Checks.app'
     executable = bundle / 'Contents/MacOS/native-checks'
@@ -21,10 +27,14 @@ with tempfile.TemporaryDirectory(prefix='nodecloak-native-package-') as temporar
     (bundle / 'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':'com.nodecloak.native-checks','CFBundleExecutable':'native-checks','CFBundlePackageType':'APPL','CFBundleVersion':'1'}))
     nested = bundle / 'Contents/Helpers/tool'
     nested.parent.mkdir()
-    shutil.copy2('/usr/bin/true',nested)
+    # Do not copy SIP filesystem flags from a system executable.
+    shutil.copyfile('/usr/bin/true',nested)
+    nested.chmod(0o755)
     subprocess.run(['/usr/bin/codesign','--force','--sign','-',str(nested)],check=True)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(bundle)], check=True)
     subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(bundle)], check=True)
     for check in ['local_audit_tokens_reject_a_different_executable_before_config', 'native_macos_bootstrap_rejects_changed_and_external_files', 'native_macos_application_proxy_routes_and_recovers_owned_network']:
         subprocess.run([str(executable), check, '--ignored', '--nocapture', '--test-threads=1'], check=True, timeout=600)
 print('Mac process routing, peer identity and owned network teardown passed.')
+if vendor_result is not None:
+    vendor_result.check_returncode()
