@@ -32,7 +32,9 @@ jobs:
       - run: npm ci
       - run: node scripts/prepare-singbox.mjs
       - if: ${{ !inputs.native_debug }}
-        run: npm test
+        # Intel runners can be CPU constrained; avoid oversubscribing the
+        # existing 5-second UI tests without relaxing their assertions/deadline.
+        run: npm test -- --maxWorkers=2
       - run: npm run build
       - if: ${{ !inputs.native_debug }}
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib

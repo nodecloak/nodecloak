@@ -207,7 +207,12 @@ async fn native_macos_application_proxy_routes_and_recovers_owned_network() {
         .success());
     let mut paths = vec![];
     for name in ["Codex", "ChatGPT", "Claude", "Unmatched"] {
-        let dir = root.path().join(format!("{name}.app/Contents/MacOS"));
+        let dir = if name == "Claude" {
+            root.path()
+                .join("Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS")
+        } else {
+            root.path().join(format!("{name}.app/Contents/MacOS"))
+        };
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("SameName");
         std::fs::copy(&probe, &exe).unwrap();
