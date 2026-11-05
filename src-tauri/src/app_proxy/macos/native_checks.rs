@@ -362,6 +362,29 @@ async fn local_audit_tokens_reject_a_different_executable_before_config() {
     .is_ok());
     assert!(super::identity::peer(&server, &"0".repeat(40), None, None).is_err());
     assert!(super::identity::peer(&server, &hash, Some(std::process::id() + 1), None).is_err());
+    assert!(
+        super::identity::peer(&server, &hash, None, Some(unsafe { libc::geteuid() } + 1)).is_err()
+    );
+    let mut token = [0u32; 8];
+    let mut length = std::mem::size_of_val(&token) as libc::socklen_t;
+    use std::os::fd::AsRawFd;
+    assert_eq!(
+        unsafe {
+            libc::getsockopt(
+                server.as_raw_fd(),
+                0,
+                6,
+                token.as_mut_ptr().cast(),
+                &mut length,
+            )
+        },
+        0
+    );
+    token[7] ^= 1;
+    assert!(
+        super::identity::validate_token(&token, &hash).is_err(),
+        "reused or exec-replaced PID must be rejected by the kernel generation check"
+    );
     ipc::write_frame(
         &mut server,
         &ipc::Hello {
