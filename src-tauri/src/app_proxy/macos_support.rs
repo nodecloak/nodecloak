@@ -96,7 +96,18 @@ pub fn preflight(
         return Err("此应用代理接口已存在，已保留原网络".into());
     }
     for route in routes.iter().filter(|r| r.interface != owned) {
-        if !starting && route.interface=="lo0" && ["172.29.255.1","172.29.255.1/32","fd64:6e6f:6465::1","fd64:6e6f:6465::1/128"].contains(&route.destination.as_str()) {continue}
+        if !starting
+            && route.interface == "lo0"
+            && [
+                "172.29.255.1",
+                "172.29.255.1/32",
+                "fd64:6e6f:6465::1",
+                "fd64:6e6f:6465::1/128",
+            ]
+            .contains(&route.destination.as_str())
+        {
+            continue;
+        }
         let tun = ["utun", "tun", "tap", "ppp", "ipsec"]
             .iter()
             .any(|s| route.interface.starts_with(s));
@@ -127,6 +138,16 @@ pub fn preflight(
 fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
+pub fn check_network_now(
+    monotonic: std::time::Duration,
+    wall: Option<std::time::Duration>,
+) -> Result<bool, String> {
+    let wall = wall.ok_or("系统时间已变化，应用代理已停止；请重新开启")?;
+    if wall > std::time::Duration::from_secs(15) {
+        return Err("系统已唤醒或网络检查延迟，应用代理已停止；请重新开启".into());
+    }
+    Ok(monotonic >= std::time::Duration::from_secs(2))
+}
 pub fn bootstrap(
     executable: &str,
     suffix: &str,
@@ -152,7 +173,7 @@ pub fn bootstrap(
     } else {
         format!("<string>--nodecloak-app-proxy</string><string>{suffix}</string><string>{parent}</string>")
     };
-    let requirement = quote(&format!("cdhash H\"{hash}\""));
+    let requirement = quote(&format!("=cdhash H\"{hash}\""));
     Ok(format!(
         r#"set -eu
 umask 077
@@ -160,8 +181,8 @@ d=$(/usr/bin/mktemp -d /private/var/run/nodecloak-ap.XXXXXXXX)
 cleanup() {{
   trap - EXIT HUP INT TERM
   /bin/launchctl bootout system/{label} >/dev/null 2>&1 || :
-  /bin/rm -f "$d/helper" "$d/sing-box" "$d/job.plist"
-  /bin/rmdir "$d"
+  /bin/rm -f "$d/helper" "$d/sing-box" "$d/job.plist" "$d/helper.stderr"
+  if test -d "$d"; then /bin/rmdir "$d"; fi
 }}
 trap cleanup EXIT HUP INT TERM
 /bin/cp {source} "$d/helper"
@@ -175,6 +196,7 @@ trap cleanup EXIT HUP INT TERM
 <key>ProgramArguments</key><array><string>$d/helper</string>{arguments}</array>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin</string><key>NC_AP_TEST_SUFFIX</key><string>{suffix}</string><key>NC_AP_TEST_PARENT</key><string>{parent}</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><false/>
+<key>StandardErrorPath</key><string>$d/helper.stderr</string>
 <key>AbandonProcessGroup</key><false/>
 </dict></plist>
 PLIST
@@ -189,6 +211,7 @@ while state=$(/bin/launchctl print system/{label} 2>/dev/null); do
     i=$((i+1)); test "$i" -lt 300; /bin/sleep 0.1
   fi
 done
+if test -f "$d/helper.stderr"; then /usr/bin/head -c 4096 "$d/helper.stderr" >&2; fi
 "#,
         source = quote(executable)
     ))
@@ -196,6 +219,17 @@ done
 #[cfg(test)]
 mod checks {
     use super::*;
+    #[test]
+    fn clock_regression_and_sleep_do_not_suspend_network_guard() {
+        use std::time::Duration;
+        assert!(check_network_now(Duration::from_secs(2), None).is_err());
+        assert!(check_network_now(Duration::from_secs(2), Some(Duration::from_secs(120))).is_err());
+        assert!(check_network_now(Duration::from_secs(2), Some(Duration::from_secs(2))).unwrap());
+        assert!(
+            !check_network_now(Duration::from_millis(100), Some(Duration::from_millis(100)))
+                .unwrap()
+        );
+    }
     #[test]
     fn scoped_apple_interfaces_are_not_competing_vpns_but_unscoped_defaults_are() {
         let base="Routing tables\nInternet6:\nDestination Gateway Flags Netif Expire\ndefault fe80::%utun0 UGcIg utun0\n";

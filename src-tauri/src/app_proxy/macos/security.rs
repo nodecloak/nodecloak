@@ -29,6 +29,37 @@ pub fn directory() -> Result<PathBuf, String> {
     Ok(dir.to_owned())
 }
 pub struct Ownership(File);
+/// Bootstrap's trap is the primary owner. This fallback also unregisters the
+/// transient job when the authorization launcher is killed without a trap.
+pub struct Lifecycle {
+    directory: PathBuf,
+    label: String,
+}
+impl Lifecycle {
+    pub fn new(suffix: &str) -> Result<Self, String> {
+        let id = uuid::Uuid::parse_str(suffix).map_err(|_| "应用代理会话标识无效")?;
+        Ok(Self {
+            directory: directory()?,
+            label: format!("com.nodecloak.ap.{}", id.simple()),
+        })
+    }
+}
+impl Drop for Lifecycle {
+    fn drop(&mut self) {
+        for name in ["sing-box", "helper", "job.plist", "helper.stderr"] {
+            let _ = std::fs::remove_file(self.directory.join(name));
+        }
+        let _ = std::fs::remove_dir(&self.directory);
+        // Core teardown has already completed. launchd may terminate this job
+        // during bootout, which is expected; no unrelated label is addressed.
+        let _ = std::process::Command::new("/bin/launchctl")
+            .args(["bootout", &format!("system/{}", self.label)])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
 pub fn ownership_mutex() -> Result<Ownership, String> {
     let file = OpenOptions::new()
         .read(true)

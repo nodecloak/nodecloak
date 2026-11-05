@@ -48,7 +48,20 @@ impl Session {
     async fn released(&self) {
         assert!(self.helper.wait(15000), "launcher/job did not exit");
         for _ in 0..50 {
-            if network::released(&self.interface, self.index).unwrap() {
+            if network::released(&self.interface, self.index).unwrap()
+                && !Command::new("/usr/bin/sudo")
+                    .args([
+                        "-n",
+                        "/bin/launchctl",
+                        "print",
+                        &format!("system/{}", self.helper.label),
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .unwrap()
+                    .success()
+            {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -127,7 +140,18 @@ fn stable() -> serde_json::Value {
         assert!(out.status.success());
         String::from_utf8(out.stdout).unwrap()
     };
-    serde_json::json!({"interfaces":state.interfaces,"routes":routes,"network":state.signature,"dns":scutil("--dns"),"proxy":scutil("--proxy")})
+    let mut roots: Vec<_> = std::fs::read_dir("/private/var/run")
+        .unwrap()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()
+                .filter(|n| n.starts_with("nodecloak-ap."))
+                .map(str::to_owned)
+        })
+        .collect();
+    roots.sort();
+    serde_json::json!({"interfaces":state.interfaces,"routes":routes,"network":state.signature,"dns":scutil("--dns"),"proxy":scutil("--proxy"),"rootDirectories":roots})
 }
 fn sudo_signal(pid: u32, signal: &str) {
     assert!(Command::new("/usr/bin/sudo")
@@ -198,6 +222,16 @@ async fn native_macos_application_proxy_routes_and_recovers_owned_network() {
     session.helper.close_control();
     session.released().await;
     assert_eq!(stable(), before, "GUI EOF retained network state");
+    drop(session);
+    let req = request(&paths[..3], fixture.port);
+    let session = Session::begin(&req).await;
+    sudo_signal(session.helper.launcher_pid(), "-KILL");
+    session.released().await;
+    assert_eq!(
+        stable(),
+        before,
+        "launcher SIGKILL retained job/files/network"
+    );
     drop(session);
     let req = request(&paths[..3], fixture.port);
     let session = Session::begin(&req).await;

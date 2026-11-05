@@ -8,10 +8,7 @@ use super::{
 use std::{
     net::TcpListener,
     process::Command,
-    sync::{
-        atomic::Ordering,
-        Arc,
-    },
+    sync::{atomic::Ordering, Arc},
     time::Duration,
 };
 const ID: &str = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";

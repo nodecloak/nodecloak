@@ -20,8 +20,13 @@ pub struct Handle {
     shutdown: Mutex<Option<std::os::unix::net::UnixStream>>,
     error: Arc<Mutex<String>>,
     pub pid: u32,
+    pub label: String,
 }
 impl Handle {
+    #[cfg(test)]
+    pub fn launcher_pid(&self) -> u32 {
+        self.child.lock().unwrap().id()
+    }
     pub fn alive(&self) -> bool {
         let running = self
             .child
@@ -140,6 +145,10 @@ fn launch(suffix: &str, parent: u32, hash: &str) -> Result<Handle, String> {
         shutdown: Mutex::new(None),
         error,
         pid: 0,
+        label: format!(
+            "com.nodecloak.ap.{}",
+            uuid::Uuid::parse_str(suffix).unwrap().simple()
+        ),
     })
 }
 pub async fn connect_helper() -> Result<(Server, Handle), String> {

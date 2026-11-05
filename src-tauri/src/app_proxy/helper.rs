@@ -1,5 +1,7 @@
 #[cfg(any(windows, target_os = "macos"))]
 pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let _lifecycle = super::macos::security::Lifecycle::new(suffix)?;
     use super::{
         config,
         driver::{network, process, security::PrivateCore, transport},
@@ -146,15 +148,19 @@ pub async fn run(suffix: &str, parent: u32) -> Result<(), String> {
             }
             #[cfg(target_os = "macos")]
             let mut last_network_check = std::time::SystemTime::now();
+            #[cfg(target_os = "macos")]
+            let mut last_network_tick = tokio::time::Instant::now();
             while !cancel.load(Ordering::Acquire) && parent_handle.alive() && core.alive() {
                 #[cfg(target_os = "macos")]
-                if last_network_check.elapsed().unwrap_or_default() >= Duration::from_secs(2) {
-                    if last_network_check.elapsed().unwrap_or_default() > Duration::from_secs(15)
-                        || !network::unchanged(&original_network, &interface)?
-                    {
+                if super::macos_support::check_network_now(
+                    last_network_tick.elapsed(),
+                    last_network_check.elapsed().ok(),
+                )? {
+                    if !network::unchanged(&original_network, &interface)? {
                         return Err("网络连接已变化或系统已唤醒，应用代理已停止；请重新开启".into());
                     }
                     last_network_check = std::time::SystemTime::now();
+                    last_network_tick = tokio::time::Instant::now();
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
