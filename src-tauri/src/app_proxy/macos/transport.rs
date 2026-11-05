@@ -100,16 +100,20 @@ pub fn directory(suffix: &str) -> Result<PathBuf, String> {
         id.simple()
     )))
 }
-fn launch(suffix: &str, parent: u32, hash: &str) -> Result<Handle, String> {
-    let exe = std::env::current_exe().map_err(|_| "无法定位应用代理程序")?;
-    let manifest = crate::app_proxy::macos_loader::inspect(&exe)?;
+fn launch(
+    suffix: &str,
+    parent: u32,
+    hash: &str,
+    exe: &std::path::Path,
+    manifest: &[(String, String)],
+) -> Result<Handle, String> {
     let script = macos_support::bootstrap(
         exe.to_str().ok_or("应用代理路径无效")?,
         suffix,
         parent,
         hash,
         cfg!(test),
-        &manifest,
+        manifest,
     )?;
     #[cfg(test)]
     let mut command = {
@@ -153,8 +157,23 @@ fn launch(suffix: &str, parent: u32, hash: &str) -> Result<Handle, String> {
         ),
     })
 }
+#[cfg(test)]
 pub async fn connect_helper() -> Result<(Server, Handle), String> {
+    connect_helper_cancellable(Arc::new(std::sync::atomic::AtomicBool::new(false))).await
+}
+pub async fn connect_helper_cancellable(
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(Server, Handle), String> {
     let hash = identity::live_hash()?;
+    let exe = std::env::current_exe().map_err(|_| "无法定位应用代理程序")?;
+    let copy = exe.clone();
+    let manifest = crate::app_proxy::runtime::prepare(cancel.clone(), move || {
+        crate::app_proxy::macos_loader::inspect(&copy)
+    })
+    .await?;
+    if cancel.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("应用代理启动已取消".into());
+    }
     let suffix = uuid::Uuid::new_v4().to_string();
     let dir = directory(&suffix)?;
     std::fs::DirBuilder::new()
@@ -169,7 +188,7 @@ pub async fn connect_helper() -> Result<(Server, Handle), String> {
         std::fs::Permissions::from_mode(0o600),
     )
     .map_err(|_| "无法保护应用代理通道")?;
-    let mut handle = launch(&suffix, std::process::id(), &hash)?;
+    let mut handle = launch(&suffix, std::process::id(), &hash, &exe, &manifest)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     let mut stream = loop {
         if !handle.alive() {
@@ -224,15 +243,18 @@ pub async fn open_parent(suffix: &str, parent: u32) -> Result<(Server, identity:
     let mut stream = tokio::net::UnixStream::connect(dir.join("control.sock"))
         .await
         .map_err(|_| "无法连接应用代理主程序")?;
+    // Darwin records an accepted socket's effective peer audit identity once
+    // the accepting process has used it. Read only the bounded public challenge
+    // first; authenticate its sender before echoing or accepting configuration.
+    let hello: Hello = tokio::time::timeout(Duration::from_secs(5), ipc::read_frame(&mut stream))
+        .await
+        .map_err(|_| "应用代理身份核验超时")??;
     let peer = identity::peer(
         &stream,
         &identity::live_hash()?,
         Some(parent),
         Some(meta.uid()),
     )?;
-    let hello: Hello = tokio::time::timeout(Duration::from_secs(5), ipc::read_frame(&mut stream))
-        .await
-        .map_err(|_| "应用代理身份核验超时")??;
     if !ipc::authenticated(&hello, &hello.token) {
         return Err("应用代理主程序身份核验失败".into());
     }

@@ -66,7 +66,10 @@ pub fn peer(
     } != 0
         || length as usize != std::mem::size_of_val(&token)
     {
-        return Err("无法读取应用代理通道身份".into());
+        return Err(format!(
+            "无法读取应用代理通道身份（{}）",
+            std::io::Error::last_os_error()
+        ));
     }
     if token[5] == 0 || pid.is_some_and(|p| p != token[5]) || uid.is_some_and(|u| u != token[1]) {
         return Err("应用代理通道的进程或用户不匹配".into());

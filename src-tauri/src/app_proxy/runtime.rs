@@ -18,6 +18,26 @@ async fn wait_cancelled(cancel: Arc<AtomicBool>) {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
+/// Only read-only preparation may run here. Dropping a cancelled blocking
+/// task must never leave an authorization launcher or privileged side effect.
+#[cfg(any(windows, target_os = "macos"))]
+pub(super) async fn prepare<T: Send + 'static>(
+    cancel: Arc<AtomicBool>,
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    if cancel.load(Ordering::Acquire) {
+        return Err("应用代理启动已取消".into());
+    }
+    let task = tokio::task::spawn_blocking(work);
+    tokio::select! {
+        biased;
+        _=wait_cancelled(cancel.clone())=>Err("应用代理启动已取消".into()),
+        result=task=>{
+            if cancel.load(Ordering::Acquire){return Err("应用代理启动已取消".into())}
+            result.map_err(|_|"应用代理准备任务中断")?
+        }
+    }
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -190,14 +210,17 @@ impl Runtime {
             }
             self.cancel.store(false, Ordering::Release);
             let settings = super::store::load(root)?;
-            self.discover().await?;
+            let apps = prepare(self.cancel.clone(), discovery::discover).await?;
+            *self.apps.lock().map_err(|_| "应用识别状态不可用")? = (true, apps);
             let apps = self
                 .apps
                 .lock()
                 .map_err(|_| "应用识别状态不可用")?
                 .1
                 .clone();
-            let (rules, warnings) = resolve(&settings, &apps)?;
+            let settings_copy = settings.clone();
+            let (rules, warnings) =
+                prepare(self.cancel.clone(), move || resolve(&settings_copy, &apps)).await?;
             let mut filtered = settings.clone();
             filtered
                 .rules
@@ -438,9 +461,17 @@ impl Session {
         root: std::path::PathBuf,
     ) -> Result<Self, String> {
         use super::ipc::{self, Reply};
+        // Validate the complete expanded request before opening an elevation
+        // prompt. The receiver independently keeps the same frame limit.
+        ipc::validate_size(&request)?;
+        #[cfg(target_os = "macos")]
+        let connect = super::driver::transport::connect_helper_cancellable(cancel.clone());
+        #[cfg(windows)]
+        let connect = super::driver::transport::connect_helper();
         let (pipe, helper) = tokio::select! {
-            result=super::driver::transport::connect_helper()=>result?,
+            biased;
             _=wait_cancelled(cancel.clone())=>return Err("应用代理启动已取消".into()),
+            result=connect=>result?,
         };
         let helper = Arc::new(helper);
         let mut startup = StartingSession {
@@ -772,6 +803,37 @@ mod checks {
         tokio::time::timeout(Duration::from_millis(500), wait_cancelled(cancel))
             .await
             .unwrap();
+    }
+    #[cfg(any(windows, target_os = "macos"))]
+    #[tokio::test]
+    async fn cancellation_during_blocking_scan_cannot_later_request_authorization() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let authorized = Arc::new(AtomicBool::new(false));
+        let observed = authorized.clone();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let wake = cancel.clone();
+        let start = tokio::spawn(async move {
+            prepare(cancel, move || {
+                let _ = entered.send(());
+                let _ = blocked.recv();
+                Ok(())
+            })
+            .await?;
+            authorized.store(true, Ordering::Release);
+            Ok::<_, String>(())
+        });
+        started.await.unwrap();
+        wake.store(true, Ordering::Release);
+        let result = tokio::time::timeout(Duration::from_millis(500), start)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.is_err());
+        assert!(!observed.load(Ordering::Acquire));
+        release.send(()).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!observed.load(Ordering::Acquire));
     }
     #[test]
     fn connection_evidence_requires_both_the_assigned_proxy_and_the_application_path() {

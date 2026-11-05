@@ -350,8 +350,8 @@ async fn local_audit_tokens_reject_a_different_executable_before_config() {
     let path = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let socket = path.path().join("peer.sock");
     let listener = tokio::net::UnixListener::bind(&socket).unwrap();
-    let client = tokio::net::UnixStream::connect(&socket).await.unwrap();
-    let (server, _) = listener.accept().await.unwrap();
+    let mut client = tokio::net::UnixStream::connect(&socket).await.unwrap();
+    let (mut server, _) = listener.accept().await.unwrap();
     let hash = super::identity::live_hash().unwrap();
     assert!(super::identity::peer(
         &server,
@@ -362,6 +362,26 @@ async fn local_audit_tokens_reject_a_different_executable_before_config() {
     .is_ok());
     assert!(super::identity::peer(&server, &"0".repeat(40), None, None).is_err());
     assert!(super::identity::peer(&server, &hash, Some(std::process::id() + 1), None).is_err());
+    ipc::write_frame(
+        &mut server,
+        &ipc::Hello {
+            protocol: 1,
+            token: "a".repeat(64),
+        },
+    )
+    .await
+    .unwrap();
+    let _: ipc::Hello = ipc::read_frame(&mut client).await.unwrap();
+    assert!(
+        super::identity::peer(
+            &client,
+            &hash,
+            Some(std::process::id()),
+            Some(unsafe { libc::geteuid() })
+        )
+        .is_ok(),
+        "client must authenticate the accepting writer before sending config"
+    );
     drop(client);
     let mut foreign = Command::new("/usr/bin/nc")
         .arg("-U")
