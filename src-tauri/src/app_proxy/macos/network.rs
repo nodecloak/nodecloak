@@ -64,8 +64,11 @@ pub fn preflight(snapshot: &Snapshot, interface: &str) -> Result<(), String> {
     macos_support::preflight(&snapshot.routes, &snapshot.interfaces, interface, true)
 }
 fn valid_interface(s: &str) -> bool {
-    s.strip_prefix("utun")
-        .is_some_and(|n| !n.is_empty() && n.len() <= 6 && n.bytes().all(|b| b.is_ascii_digit()))
+    s.strip_prefix("utun").is_some_and(|n| {
+        !n.is_empty()
+            && n.bytes().all(|b| b.is_ascii_digit())
+            && n.parse::<u32>().is_ok_and(|n| (1024..=32767).contains(&n))
+    })
 }
 pub fn interface_luid(interface: &str) -> Result<Option<u64>, String> {
     if !valid_interface(interface) {

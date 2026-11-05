@@ -16,6 +16,17 @@ use serde_json::json;
 
 const ID: &str = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";
 #[test]
+fn mac_interface_units_never_exceed_the_darwin_unit_range() {
+    for value in [0u16, 31743, 32767, 32768, 64511, u16::MAX] {
+        let mut bytes = [0u8; 16];
+        bytes[..2].copy_from_slice(&value.to_be_bytes());
+        let id = uuid::Uuid::from_bytes(bytes);
+        let name = config::interface_name_for(config::Platform::Macos, &id.to_string()).unwrap();
+        let unit = name.strip_prefix("utun").unwrap().parse::<u32>().unwrap();
+        assert!((1024..=32767).contains(&unit), "{value}: {name}");
+    }
+}
+#[test]
 fn mac_paths_preserve_case_and_slashes_for_process_identity() {
     let path = "/Applications/Codex.app/Contents/MacOS/Codex";
     assert_eq!(discovery::normalize(path), path);

@@ -30,7 +30,9 @@ pub fn interface_name_for(platform: Platform, session: &str) -> Result<String, S
     if platform == Platform::Macos {
         return Ok(format!(
             "utun{}",
-            1024 + u16::from_be_bytes([id.as_bytes()[0], id.as_bytes()[1]]) as u32
+            // ifnet_allocate_extended rejects unit > SHRT_MAX. Leave Apple's
+            // low-numbered interfaces alone without generating invalid units.
+            1024 + u16::from_be_bytes([id.as_bytes()[0], id.as_bytes()[1]]) as u32 % (32768 - 1024)
         ));
     }
     Ok(format!(

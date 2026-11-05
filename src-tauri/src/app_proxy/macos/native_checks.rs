@@ -42,6 +42,11 @@ struct Session {
 }
 impl Session {
     async fn begin(request: &StartRequest) -> Self {
+        println!(
+            "Starting native Mac session {} on {}",
+            request.session,
+            crate::app_proxy::config::interface_name(&request.session).unwrap()
+        );
         let (mut pipe, helper) = transport::connect_helper().await.unwrap();
         ipc::write_frame(&mut pipe, request).await.unwrap();
         match tokio::time::timeout(
