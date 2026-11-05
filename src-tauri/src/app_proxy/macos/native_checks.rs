@@ -212,6 +212,25 @@ async fn native_macos_application_proxy_routes_and_recovers_owned_network() {
     let before = stable();
     let req = request(&paths[..3], fixture.port);
     let mut session = Session::begin(&req).await;
+    // A second root helper must fail without touching the active session.
+    let (mut second, second_helper) = transport::connect_helper().await.unwrap();
+    ipc::write_frame(&mut second, &request(&paths[..3], fixture.port))
+        .await
+        .unwrap();
+    let failure = tokio::time::timeout(
+        Duration::from_secs(10),
+        ipc::read_frame::<_, Reply>(&mut second),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(matches!(failure,Reply::Failure{message} if message.contains("另一应用代理会话")));
+    second_helper.close_control();
+    assert!(second_helper.wait(15000));
+    assert_eq!(
+        network::owned_luid(&session.interface).unwrap(),
+        Some(session.index)
+    );
     for (name, path) in &paths[..3] {
         for mode in ["tcp", "udp"] {
             let path = path.clone();
@@ -233,6 +252,42 @@ async fn native_macos_application_proxy_routes_and_recovers_owned_network() {
     );
     session.stop().await;
     assert_eq!(stable(), before, "Stop changed network preferences/routes");
+    drop(session);
+    let req = request(&paths[..3], fixture.port);
+    let session = Session::begin(&req).await;
+    let children = Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,comm="])
+        .output()
+        .unwrap();
+    let children = String::from_utf8(children.stdout).unwrap();
+    let core: Vec<u32> = children
+        .lines()
+        .filter_map(|line| {
+            let mut p = line.split_whitespace();
+            let pid = p.next()?.parse().ok()?;
+            let parent: u32 = p.next()?.parse().ok()?;
+            (parent == session.helper.pid && p.collect::<Vec<_>>().join(" ").ends_with("/sing-box"))
+                .then_some(pid)
+        })
+        .collect();
+    assert_eq!(core.len(), 1, "must address exactly the owned core");
+    sudo_signal(core[0], "-KILL");
+    session.released().await;
+    assert_eq!(stable(), before, "core crash retained network state");
+    drop(session);
+    // A dead assigned node must not silently become a direct connection.
+    let unavailable = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = unavailable.local_addr().unwrap().port();
+    drop(unavailable);
+    let session = Session::begin(&request(&paths[..3], port)).await;
+    let output = Command::new(&paths[0].1).arg("tcp").output().unwrap();
+    assert!(
+        !output.status.success(),
+        "unavailable node unexpectedly carried traffic"
+    );
+    session.helper.close_control();
+    session.released().await;
+    assert_eq!(stable(), before, "dead proxy retained network state");
     drop(session);
     let req = request(&paths[..3], fixture.port);
     let session = Session::begin(&req).await;
@@ -308,4 +363,113 @@ async fn local_audit_tokens_reject_a_different_executable_before_config() {
     assert!(super::identity::peer(&server, &"0".repeat(40), None, None).is_err());
     assert!(super::identity::peer(&server, &hash, Some(std::process::id() + 1), None).is_err());
     drop(client);
+    let mut foreign = Command::new("/usr/bin/nc")
+        .arg("-U")
+        .arg(&socket)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let (server, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        super::identity::peer(
+            &server,
+            &hash,
+            Some(foreign.id()),
+            Some(unsafe { libc::geteuid() })
+        )
+        .is_err(),
+        "foreign executable passed live code validation"
+    );
+    let _ = foreign.kill();
+    let _ = foreign.wait();
+}
+
+#[test]
+#[ignore = "Root bootstrap negative checks; disposable Mac CI only"]
+fn native_macos_bootstrap_rejects_changed_and_external_files() {
+    assert_eq!(
+        std::env::var("NODECLOAK_ALLOW_MAC_TUN_TESTS").as_deref(),
+        Ok("1")
+    );
+    let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+    let before = stable();
+    let app = root.path().join("Fixture.app");
+    let executable = app.join("Contents/MacOS/fixture");
+    std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    std::fs::copy("/usr/bin/true", &executable).unwrap();
+    let info = r#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.nodecloak.bootstrap-negative</string><key>CFBundleExecutable</key><string>fixture</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>"#;
+    std::fs::write(app.join("Contents/Info.plist"), info).unwrap();
+    assert!(Command::new("/usr/bin/codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(&app)
+        .status()
+        .unwrap()
+        .success());
+    let manifest = crate::app_proxy::macos_loader::inspect(&executable).unwrap();
+    let suffix = uuid::Uuid::new_v4().to_string();
+    let script = crate::app_proxy::macos_support::bootstrap(
+        executable.to_str().unwrap(),
+        &suffix,
+        std::process::id(),
+        &super::identity::live_hash().unwrap(),
+        true,
+        &manifest,
+    )
+    .unwrap();
+    let source = root.path().join("authorize.applescript");
+    std::fs::write(
+        &source,
+        crate::app_proxy::macos_support::applescript(&script),
+    )
+    .unwrap();
+    assert!(Command::new("/usr/bin/osacompile")
+        .arg("-o")
+        .arg(root.path().join("authorize.scpt"))
+        .arg(source)
+        .status()
+        .unwrap()
+        .success());
+    let sentinel = root.path().join("external.txt");
+    std::fs::write(&sentinel, "must survive").unwrap();
+    let link = app.join("Contents/external");
+    std::os::unix::fs::symlink(&sentinel, &link).unwrap();
+    let run = || {
+        Command::new("/usr/bin/sudo")
+            .args(["-n", "/bin/sh", "-c", &script])
+            .output()
+            .unwrap()
+    };
+    let result = run();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("external or broken symlink"),
+        "{result:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&sentinel).unwrap(), "must survive");
+    assert_eq!(
+        stable(),
+        before,
+        "rejected bundle changed network or left root files"
+    );
+    std::fs::remove_file(link).unwrap();
+    // Simulate a source replacement between inspection and root copy.
+    let mut bytes = std::fs::read(&executable).unwrap();
+    bytes.push(0);
+    std::fs::write(&executable, bytes).unwrap();
+    let result = run();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("program changed"),
+        "{result:?}"
+    );
+    assert_eq!(
+        stable(),
+        before,
+        "replaced source left root files or network changes"
+    );
 }

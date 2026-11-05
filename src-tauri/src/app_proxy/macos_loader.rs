@@ -125,6 +125,11 @@ fn immutable(path: &str) -> bool {
 pub fn validate(image: &str, bundle: Option<&str>, load: &Loads) -> Result<(), String> {
     let inside = |p: &str| immutable(p) || bundle.is_some_and(|b| p.starts_with(&format!("{b}/")));
     let resolve = |p: &str| -> Option<String> {
+        // Absolute paths into the original user-writable bundle do not move
+        // with our protected copy. Only system absolute paths are safe.
+        if p.starts_with('/') {
+            return normalized(p).filter(|p| immutable(p));
+        }
         let path = if let Some(tail) = p.strip_prefix("@loader_path") {
             format!("{}{tail}", image.rsplit_once('/')?.0)
         } else if let Some(tail) = p.strip_prefix("@executable_path") {
@@ -228,6 +233,61 @@ pub fn inspect(executable: &Path) -> Result<Vec<(String, String)>, String> {
 #[cfg(test)]
 mod checks {
     use super::*;
+    #[test]
+    fn malformed_fat_images_cannot_recurse_or_escape_the_load_table() {
+        let mut image = vec![0u8; 64];
+        image[..4].copy_from_slice(&[0xca, 0xfe, 0xba, 0xbe]);
+        image[4..8].copy_from_slice(&1u32.to_be_bytes());
+        image[16..20].copy_from_slice(&0u32.to_be_bytes());
+        image[20..24].copy_from_slice(&64u32.to_be_bytes());
+        assert!(loads(&image).is_err());
+        image[16..20].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(loads(&image).is_err());
+        let mut thin = vec![0u8; 32];
+        thin[..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]);
+        thin[16..20].copy_from_slice(&1u32.to_le_bytes());
+        assert!(loads(&thin).is_err());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn inspection_keeps_internal_framework_links_and_rejects_external_links() {
+        let dir = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let app = dir.path().join("Safe.app");
+        let exe = app.join("Contents/MacOS/safe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        let mut thin = vec![0u8; 32];
+        thin[..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]);
+        std::fs::write(&exe, thin).unwrap();
+        let link = app.join("Contents/alias");
+        std::os::unix::fs::symlink("MacOS", &link).unwrap();
+        assert_eq!(inspect(&exe).unwrap().len(), 1);
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(dir.path(), link).unwrap();
+        assert!(inspect(&exe).is_err());
+    }
+    #[test]
+    fn absolute_paths_into_original_bundle_are_not_relocated() {
+        let image = "/Users/u/NodeCloak.app/Contents/MacOS/nodecloak";
+        let root = Some("/Users/u/NodeCloak.app");
+        assert!(validate(
+            image,
+            root,
+            &Loads {
+                libraries: vec!["/Users/u/NodeCloak.app/Contents/Frameworks/Unsafe.dylib".into()],
+                rpaths: vec![]
+            }
+        )
+        .is_err());
+        assert!(validate(
+            image,
+            root,
+            &Loads {
+                libraries: vec!["@rpath/Unsafe.dylib".into()],
+                rpaths: vec!["/Users/u/NodeCloak.app/Contents/Frameworks".into()]
+            }
+        )
+        .is_err());
+    }
     #[test]
     fn loader_paths_are_protected_and_user_writable_rpaths_are_rejected() {
         let image = "/Applications/NodeCloak.app/Contents/MacOS/nodecloak";

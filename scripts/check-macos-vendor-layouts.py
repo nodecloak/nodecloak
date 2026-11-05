@@ -28,6 +28,8 @@ for vendor, url, expected_team in sources:
             assert applications, 'No application in official image'
             for app in applications:
                 info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+                entries=list(app.rglob('*'))
+                print(json.dumps({'bundle':app.name,'entries':len(entries),'maxDepth':max(len(p.relative_to(app).parts) for p in entries)}),flush=True)
                 requirement = f'=anchor apple generic and certificate leaf[subject.OU] = "{expected_team}"'
                 subprocess.run(['/usr/bin/codesign','--verify','--strict','-R',requirement,str(app)],check=True,timeout=120)
                 env = dict(os.environ,NODECLOAK_MAC_VENDOR_BUNDLE=str(app))

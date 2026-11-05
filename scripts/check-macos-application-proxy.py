@@ -25,6 +25,6 @@ with tempfile.TemporaryDirectory(prefix='nodecloak-native-package-') as temporar
     subprocess.run(['/usr/bin/codesign','--force','--sign','-',str(nested)],check=True)
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(bundle)], check=True)
     subprocess.run(['/usr/bin/codesign', '--verify', '--strict', str(bundle)], check=True)
-    for check in ['local_audit_tokens_reject_a_different_executable_before_config', 'native_macos_application_proxy_routes_and_recovers_owned_network']:
+    for check in ['local_audit_tokens_reject_a_different_executable_before_config', 'native_macos_bootstrap_rejects_changed_and_external_files', 'native_macos_application_proxy_routes_and_recovers_owned_network']:
         subprocess.run([str(executable), check, '--ignored', '--nocapture', '--test-threads=1'], check=True, timeout=600)
 print('Mac process routing, peer identity and owned network teardown passed.')

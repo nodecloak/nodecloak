@@ -215,13 +215,15 @@ pub fn executables(selection: &Path) -> Result<Vec<String>, String> {
     let mut result = vec![];
     let mut visited = 0;
     while let Some((dir, depth)) = pending.pop() {
-        if depth > 16 {
+        // Electron's bundled runtimes can nest dependency data beyond 16
+        // levels. Keep a finite budget without rejecting these real apps.
+        if depth > 64 {
             return Err("应用目录层级超过限制".into());
         }
         for entry in std::fs::read_dir(&dir).map_err(|_| "无法读取应用内容")? {
             let entry = entry.map_err(|_| "无法读取应用内容")?;
             visited += 1;
-            if visited > 20_000 {
+            if visited > 100_000 {
                 return Err("应用包含的文件过多，请选择实际程序文件".into());
             }
             let kind = entry.file_type().map_err(|_| "无法检查应用文件")?;
@@ -281,36 +283,44 @@ pub fn discover(apps: &mut [super::discovery::DetectedApp]) -> Result<(), String
         true,
         ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
     );
-    for app in apps {
-        // Product identity comes from the bundle, not its display name. Some
-        // Codex builds use ChatGPT.app as their on-disk name.
-        let mut bundles:Vec<_> = ["Codex","ChatGPT","Claude"].iter().map(|name|std::path::PathBuf::from(format!("/Applications/{name}.app"))).collect();
-        if let Some(home) = std::env::var_os("HOME") {
-            for name in ["Codex","ChatGPT","Claude"] {
-                bundles.push(std::path::PathBuf::from(&home).join("Applications").join(format!("{name}.app")));
-            }
+    let mut bundles: Vec<_> = ["Codex", "ChatGPT", "Claude"]
+        .iter()
+        .map(|name| std::path::PathBuf::from(format!("/Applications/{name}.app")))
+        .collect();
+    if let Some(home) = std::env::var_os("HOME") {
+        for name in ["Codex", "ChatGPT", "Claude"] {
+            bundles.push(
+                std::path::PathBuf::from(&home)
+                    .join("Applications")
+                    .join(format!("{name}.app")),
+            );
         }
-        for process in system.processes().values() {
-            if let Some(path) = process
-                .exe()
-                .and_then(|p| p.to_str())
-                .filter(|p| identify(p) == Some(app.id.as_str()))
+    }
+    for process in system.processes().values() {
+        if let Some(path) = process
+            .exe()
+            .filter(|p| p.to_str().is_some_and(valid_executable_path))
+        {
+            if let Some(bundle) = path
+                .ancestors()
+                .filter(|p| p.extension().is_some_and(|s| s == "app"))
+                .last()
             {
-                if let Some(bundle) = Path::new(path)
-                    .ancestors()
-                    .filter(|p| p.extension().is_some_and(|s| s == "app"))
-                    .last()
-                {
-                    bundles.push(bundle.to_owned());
-                }
+                bundles.push(bundle.to_owned());
             }
         }
-        bundles.sort();
-        bundles.dedup();
-        for bundle in bundles {
-            if bundle.exists() && bundle_product(&bundle) == Some(app.id.as_str()) {
-                app.paths.extend(executables(&bundle)?);
-            }
+    }
+    bundles.sort();
+    bundles.dedup();
+    // Inspect each bundle once, rather than spawning identity checks per process
+    // and per rule. Products are identified independently of display names.
+    let found: Vec<_> = bundles
+        .into_iter()
+        .filter_map(|bundle| bundle_product(&bundle).map(|id| (id, bundle)))
+        .collect();
+    for app in apps {
+        for (_, bundle) in found.iter().filter(|(id, _)| *id == app.id) {
+            app.paths.extend(executables(bundle)?);
         }
         app.paths.sort();
         app.paths.dedup();

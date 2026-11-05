@@ -208,7 +208,7 @@ pub fn bootstrap(
     let symlinks = r#"root=$1
 for link in "$root"/**/*(DN@); do
   resolved=${link:A}
-  [[ "$resolved" == "$root/"* && -e "$resolved" ]] || exit 1
+  [[ "$resolved" == "$root/"* && -e "$resolved" ]] || { print -u2 'Application proxy bundle contains an external or broken symlink'; exit 1; }
 done"#;
     let prepare = if let Some((bundle, tail)) = bundle {
         if !tail.starts_with("Contents/MacOS/")
