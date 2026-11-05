@@ -190,21 +190,30 @@ pub async fn connect_helper_cancellable(
     .map_err(|_| "无法保护应用代理通道")?;
     let mut handle = launch(&suffix, std::process::id(), &hash, &exe, &manifest)?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let mut rejected_peer = None;
     let mut stream = loop {
         if !handle.alive() {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            return Err(handle.failure());
+            return Err(match rejected_peer {
+                Some(error) => format!("{}；{error}", handle.failure()),
+                None => handle.failure(),
+            });
         }
         if tokio::time::Instant::now() >= deadline {
             return Err("等待 macOS 管理员授权或控制通道超时".into());
         }
         match tokio::time::timeout(Duration::from_millis(100), listener.accept()).await {
-            Ok(Ok((stream, _))) => {
-                if let Ok(peer) = identity::peer(&stream, &hash, None, Some(0)) {
+            Ok(Ok((stream, _))) => match identity::peer(&stream, &hash, None, Some(0)) {
+                Ok(peer) => {
                     handle.pid = peer.pid;
                     break stream;
                 }
-            }
+                Err(error) => {
+                    #[cfg(test)]
+                    eprintln!("Rejected application proxy root peer: {error}");
+                    rejected_peer = Some(error);
+                }
+            },
             Ok(Err(_)) => return Err("应用代理控制通道连接失败".into()),
             _ => {}
         }

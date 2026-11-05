@@ -3,6 +3,11 @@ on:
   push:
     branches: ['codex/application-proxy', 'codex/macos-application-proxy']
   workflow_dispatch:
+    inputs:
+      native_debug:
+        description: 'Run only the disposable ARM Mac native diagnostic gate'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -10,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-15-intel]
+        os: ${{ fromJSON(inputs.native_debug && '["macos-15"]' || '["macos-15","macos-15-intel"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -26,10 +31,13 @@ jobs:
           cache-on-failure: true
       - run: npm ci
       - run: node scripts/prepare-singbox.mjs
-      - run: npm test
+      - if: ${{ !inputs.native_debug }}
+        run: npm test
       - run: npm run build
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
-      - run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin nodecloak
+      - if: ${{ !inputs.native_debug }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib
+      - if: ${{ !inputs.native_debug }}
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin nodecloak
       - name: Prepare native test program
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --no-run --message-format=json > native-tests.json
       - name: Real Mac utun and owned launchd lifecycle
@@ -38,6 +46,7 @@ jobs:
           NODECLOAK_VERIFY_VENDOR_LAYOUTS: ${{ matrix.os == 'macos-15' && '1' || '0' }}
         run: python3 scripts/check-macos-application-proxy.py native-tests.json
   windows-tun:
+    if: ${{ !inputs.native_debug }}
     runs-on: windows-latest
     timeout-minutes: 40
     steps:

@@ -86,7 +86,7 @@ pub fn peer(
         .map_err(|_| "应用代理程序身份无效")?;
     SecCode::copy_guest_with_attribues(None, &attributes, Flags::NONE)
         .and_then(|c| c.check_validity(Flags::STRICT_VALIDATE, &requirement))
-        .map_err(|_| "应用代理通道的程序身份核验失败")?;
+        .map_err(|e| format!("应用代理通道的程序身份核验失败（{e}）"))?;
     Ok(Peer {
         pid: token[5],
         uid: token[1],
