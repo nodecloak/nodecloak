@@ -1,6 +1,6 @@
 # 应用代理
 
-「应用代理」为 Windows 或 macOS 桌面程序指定代理节点，与浏览器副本的代理设置分开管理。每次打开 NodeCloak 时保持关闭，保存的规则不会自行开启网络分流。当前源码已加入 macOS 支持；已发布的 5.0.0 仍只提供 Windows 应用代理。
+「应用代理」为 Windows 或 macOS 桌面程序指定代理节点，与浏览器副本的代理设置分开管理。每次打开 NodeCloak 时保持关闭，保存的规则不会自行开启网络分流。应用代理支持 Windows 和 macOS。
 
 1. 在侧栏打开「应用代理」，添加 HTTP、HTTPS、SOCKS5、VLESS、VMess 或 Hysteria2 节点。
 2. 在 Codex、ChatGPT、Claude 对应行选择节点，也可以通过「添加应用」选择其他程序。Windows 选择 `.exe`，macOS 选择 `.app` 应用；未找到的应用可以手动选择。

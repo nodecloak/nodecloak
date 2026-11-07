@@ -20,12 +20,11 @@ for(const [platform,name] of Object.entries(names)) {
 }
 // User-facing notices only: no admin features, server internals or build/deployment details.
 const releaseNotes=[
-  "Windows 新增独立「应用代理」，可为 Codex、ChatGPT、Claude 或自选程序设置代理节点，按程序路径分流。应用代理暂仅支持 Windows。 / Windows gains an independent Application Proxy workspace. Assign proxy nodes to Codex, ChatGPT, Claude or a selected executable using path-based rules. Application Proxy is currently Windows-only.",
-  "应用代理默认关闭。先保存节点并为已安装应用选择节点，再点击开启并完成 Windows 管理员授权；临时使用 TUN 路由，未匹配的应用直连，系统 HTTP 代理和 DNS 设置保持不变。 / Application Proxy is off by default. Save a node, assign it to an installed app, then start and approve Windows administrator permission. Temporary TUN routing sends unmatched applications directly while preserving system HTTP proxy and DNS settings.",
-  "支持 HTTP、HTTPS、SOCKS5、VLESS、VMess 和 Hysteria2 节点，保留可选的本机或软路由前置代理。Hysteria2 链式连接需要 SOCKS5 UDP 支持。 / Supports HTTP, HTTPS, SOCKS5, VLESS, VMess and Hysteria2 nodes, with an optional local or router first hop. Hysteria2 chaining requires SOCKS5 UDP support.",
-  "新增匹配连接与运行记录，可查看应用实际命中的节点、目标及收发流量。节点不可用时，已匹配的连接不会自动切换直连。 / Matching connections and activity records show the selected node, destination and traffic for observed app connections. Matched connections do not automatically fall back to direct when their node fails.",
-  "停止应用代理后释放本次接口和路由；修改规则前需先停止，退出 NodeCloak 或应用内更新时也会停止。应用自身代理、本机回环和共享宿主流量不保证由所选程序规则接管。 / Stopping releases the session interface and routes. Stop before editing rules; quitting NodeCloak or preparing an in-app update also stops routing. App-specific proxies, loopback and shared-host traffic are not guaranteed to follow the selected executable rule.",
-  "浏览器副本继续使用原来的独立代理方式，Chrome、Edge、Firefox 的节点代理、稳定指纹、MCP、同步和分享功能继续保留。统一应用代理页面的标题与标签样式。 / Browser profiles retain their independent proxy behavior. Chrome, Edge and Firefox node proxies, stable fingerprints, MCP, sync and sharing remain available. Application Proxy headings and labels now follow the shared visual style."
+  "前置代理新增独立开关，可在节点卡片或编辑页启用、关闭；关闭时保留地址、协议和节点密码，重新开启即可复用。检测节点与实际连接均遵循开关状态。 / First-hop proxies now have an explicit switch on node cards and in the editor. Turning it off retains the address, protocol and node credentials for reuse. Node checks and live connections both follow the switch.",
+  "完善 SOCKS5 连接错误提示，区分握手中断、协议或端口不匹配、认证方式及认证失败，方便核对节点配置。 / SOCKS5 errors now distinguish interrupted negotiation, protocol or port mismatches, authentication methods and authentication failures to make troubleshooting easier.",
+  "macOS 新增应用代理，支持为 Codex、ChatGPT、Claude 或自选 .app 设置节点，并匹配应用包内的网络 Helper；Windows 应用代理继续保留。 / Application Proxy is now available on macOS for Codex, ChatGPT, Claude or a selected .app, including network helpers inside its bundle. Windows Application Proxy remains available.",
+  "应用代理默认关闭，开启时请求系统管理员授权；停止或退出后释放本次接口和路由。macOS 网络切换或从休眠唤醒后会停止分流并提示重新开启。 / Application Proxy is off by default and requests administrator permission when started. Stopping or quitting releases its interface and routes. On macOS, changing networks or waking from sleep stops routing and prompts you to restart it.",
+  "修复关闭前置代理后更换 HY2 节点仍受旧前置协议限制的问题；更改前置配置后清除旧检测结果，避免显示过时出口。 / A disabled first hop no longer prevents switching to HY2 because of its cached protocol. Changing first-hop settings clears outdated node-check results."
 ];
 const manifest={version,notes:releaseNotes.map(note=>`- ${note}`).join('\n'),pub_date:new Date().toISOString(),platforms};
 fs.writeFileSync(path.join(directory,'latest.json'),JSON.stringify(manifest,null,2)+'\n');
