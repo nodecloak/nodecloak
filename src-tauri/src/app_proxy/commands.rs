@@ -114,7 +114,7 @@ pub async fn application_proxy_action(
                 String::new()
             };
             let result = crate::proxy::test(crate::proxy::Upstream {
-                config: node.proxy.clone(),
+                config: node.connection_config(),
                 password,
             })
             .await?;

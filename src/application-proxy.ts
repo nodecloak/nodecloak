@@ -2,7 +2,7 @@ import type {ProxyConfig,ProxyTest} from './browser-profiles';
 import {invoke} from '@tauri-apps/api/core';
 import {native} from './bridge';
 export interface AppProxyRule {id:string;app:'codex'|'chatgpt'|'claude'|'custom';executable:string;proxyId:string|null;enabled:boolean}
-export interface AppProxyDestination {id:string;name:string;proxy:ProxyConfig;hasPassword:boolean}
+export interface AppProxyDestination {id:string;name:string;proxy:ProxyConfig;hasPassword:boolean;preProxyEnabled?:boolean}
 export interface ProxyApplication {id:string;name:string;paths:string[];running:number}
 export interface AppProxyConnection {id:string;app:string;processPath:string;destination:string;network:string;proxyId:string;upload:number;download:number;seenAt:string}
 export interface AppProxyEvent {at:string;event:string;message:string}
@@ -18,8 +18,8 @@ export async function applicationProxy(action:string,payload?:unknown):Promise<A
  }else if(action==='stop'){demo.runtime.phase='off';demo.runtime.interface=null;demo.runtime.connections=[];}
  else if(action==='saveRules')demo.settings.rules=structuredClone(data?.rules as AppProxyRule[]);
  else if(action==='saveNode'){
-  const draft=data as unknown as {id?:string;name:string;proxy:ProxyConfig;password?:string;clearPassword?:boolean};const id=draft.id??crypto.randomUUID();
-  const old=demo.settings.proxies.find(p=>p.id===id);const node={id,name:draft.name,proxy:structuredClone(draft.proxy),hasPassword:!!draft.password||(!draft.clearPassword&&!!old?.hasPassword)};
+  const draft=data as unknown as {id?:string;name:string;proxy:ProxyConfig;preProxyEnabled?:boolean;password?:string;clearPassword?:boolean};const id=draft.id??crypto.randomUUID();
+  const old=demo.settings.proxies.find(p=>p.id===id);const node={id,name:draft.name,proxy:structuredClone(draft.proxy),preProxyEnabled:draft.preProxyEnabled??old?.preProxyEnabled??!!draft.proxy.preProxy,hasPassword:!!draft.password||(!draft.clearPassword&&!!old?.hasPassword)};
   demo.settings.proxies=demo.settings.proxies.filter(p=>p.id!==id).concat(node);
  }else if(action==='deleteNode'){
   demo.settings.proxies=demo.settings.proxies.filter(p=>p.id!==data?.id);

@@ -17,7 +17,24 @@ pub struct Destination {
     pub name: String,
     #[serde(deserialize_with = "strict_proxy")]
     pub proxy: ProxyConfig,
+    #[serde(default = "legacy_first_hop_enabled")]
+    pub pre_proxy_enabled: bool,
     pub has_password: bool,
+}
+
+fn legacy_first_hop_enabled() -> bool {
+    true
+}
+
+impl Destination {
+    /// Keep saved first-hop settings separate from the configuration used by connections.
+    pub fn connection_config(&self) -> ProxyConfig {
+        let mut config = self.proxy.clone();
+        if !self.pre_proxy_enabled {
+            config.pre_proxy = None;
+        }
+        config
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -74,6 +91,8 @@ pub struct DestinationDraft {
     pub name: String,
     #[serde(deserialize_with = "strict_proxy")]
     pub proxy: ProxyConfig,
+    #[serde(default)]
+    pub pre_proxy_enabled: Option<bool>,
     pub password: Option<String>,
     #[serde(default)]
     pub clear_password: bool,

@@ -71,3 +71,38 @@ it('refreshes native cleanup state after a failed start so the user can stop it'
  await act(async()=>root.render(<ApplicationProxy/>));await act(async()=>button('开启应用代理')!.click());
  expect(button('停止应用代理')).toBeDefined();
 });
+
+const addChainedNode=()=>view.settings.proxies.push({id:'test-node',name:'Saved node',hasPassword:true,proxy:{mode:'socks5',host:'proxy.example',port:1080,username:'user',credentialRef:'fixture',preProxy:{mode:'http',host:'192.168.10.1',port:7890}}});
+const firstHop=()=>host.querySelector<HTMLInputElement>('input[role="switch"][aria-label="前置代理 Saved node"]');
+it('quick toggle retains the cached first hop and node credentials, without starting routing',async()=>{
+ addChainedNode();
+ api.call.mockImplementation(async(action:string,payload?:Record<string,unknown>)=>{if(action==='saveNode')Object.assign(view.settings.proxies[0],{preProxyEnabled:payload!.preProxyEnabled});return structuredClone(view);});
+ await act(async()=>root.render(<ApplicationProxy/>));
+ expect(firstHop()?.checked).toBe(true);
+ await act(async()=>firstHop()!.click());
+ expect(api.call).toHaveBeenCalledWith('saveNode',expect.objectContaining({id:'test-node',preProxyEnabled:false,proxy:view.settings.proxies[0].proxy}));
+ expect(firstHop()?.checked).toBe(false);
+ await act(async()=>firstHop()!.click());
+ expect(api.call).toHaveBeenCalledWith('saveNode',expect.objectContaining({preProxyEnabled:true,proxy:view.settings.proxies[0].proxy}));
+ expect(api.call.mock.calls.some(([a])=>a==='start')).toBe(false);
+ expect(api.call.mock.calls.filter(([a])=>a==='saveNode').every(([,p])=>!p.clearPassword&&!p.password)).toBe(true);
+});
+it('editing a disabled first hop preserves the address and protocol when saving',async()=>{
+ addChainedNode();Object.assign(view.settings.proxies[0],{preProxyEnabled:false});
+ await act(async()=>root.render(<ApplicationProxy/>));
+ await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="编辑节点 Saved node"]')!.click());
+ const address=host.querySelector<HTMLInputElement>('input[placeholder="192.168.10.1:7890"]')!;
+ expect(address.value).toBe('192.168.10.1:7890');expect(address.disabled).toBe(true);
+ await act(async()=>button('保存节点')!.click());
+ expect(api.call).toHaveBeenCalledWith('saveNode',expect.objectContaining({preProxyEnabled:false,proxy:expect.objectContaining({preProxy:{mode:'http',host:'192.168.10.1',port:7890}})}));
+ await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="编辑节点 Saved node"]')!.click());
+ await act(async()=>host.querySelector<HTMLInputElement>('[aria-label="启用前置代理"]')!.click());
+ expect(host.querySelector<HTMLInputElement>('input[placeholder="192.168.10.1:7890"]')!.disabled).toBe(false);
+ await act(async()=>button('保存节点')!.click());
+ expect(api.call).toHaveBeenLastCalledWith('saveNode',expect.objectContaining({preProxyEnabled:true,proxy:expect.objectContaining({preProxy:{mode:'http',host:'192.168.10.1',port:7890}})}));
+});
+it('prevents changing the first hop of a running application proxy',async()=>{
+ addChainedNode();view.runtime.phase='running';
+ await act(async()=>root.render(<ApplicationProxy/>));
+ expect(firstHop()?.disabled).toBe(true);
+});
