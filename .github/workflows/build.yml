@@ -58,7 +58,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
       - run: node --test scripts/release-checks.mjs scripts/apple-ticket-checks.mjs
-      - run: npm test
+      - run: npm test -- --maxWorkers=2
       - run: npm run test:session-codec
       - run: node --test scripts/fingerprint.checks.mjs
       - run: npm run test:firefox-extension
@@ -154,6 +154,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_application_proxy_routes_tcp_udp_and_releases_only_owned_network -- --ignored --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+      - name: Verify macOS application proxy routing and cleanup
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          NODECLOAK_ALLOW_MAC_TUN_TESTS: '1'
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib --no-run --message-format=json > native-tests.json
+          python3 scripts/check-macos-application-proxy.py native-tests.json
       - name: Import Developer ID and validate notarization credentials
         if: env.MACOS_NOTARIZE == 'true'
         run: node scripts/macos-signing.mjs prepare

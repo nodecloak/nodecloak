@@ -57,7 +57,11 @@ pub fn validate(settings: &Settings) -> Result<(), String> {
         {
             return Err("应用代理节点配置无效".into());
         }
-        node.proxy.validate()?;
+        // Disabled hops remain editable, but must not constrain the active node protocol.
+        if let Some(first) = &node.proxy.pre_proxy {
+            first.validate()?;
+        }
+        node.connection_config().validate()?;
         if let Some(reference) = &node.proxy.credential_ref {
             if reference.len() != 32 || !reference.bytes().all(|b| b.is_ascii_hexdigit()) {
                 return Err("应用代理凭据标识无效".into());
@@ -69,7 +73,8 @@ pub fn validate(settings: &Settings) -> Result<(), String> {
             || !rules.insert(&rule.id)
             || !["codex", "chatgpt", "claude", "custom"].contains(&rule.app.as_str())
             || ((rule.app == "custom" || !rule.executable.is_empty())
-                && !super::config::valid_path(&rule.executable))
+                && !super::config::valid_path(&rule.executable)
+                && !super::macos_bundle::valid_selection(&rule.executable))
             || (rule.enabled && rule.proxy_id.is_none())
             || rule.proxy_id.as_ref().is_some_and(|id| !nodes.contains(id))
         {
@@ -137,6 +142,14 @@ pub fn save_node(
         .as_ref()
         .map(|p| p.id.clone())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    if draft.pre_proxy_enabled == Some(true) && draft.proxy.pre_proxy.is_none() {
+        return Err("请先填写前置代理地址".into());
+    }
+    let pre_proxy_enabled = draft.pre_proxy_enabled.unwrap_or_else(|| {
+        old.as_ref()
+            .map(|p| p.pre_proxy_enabled)
+            .unwrap_or(draft.proxy.pre_proxy.is_some())
+    });
     draft.proxy.credential_ref = None;
     let identity_unchanged = old.as_ref().is_some_and(|p| {
         p.proxy.mode == draft.proxy.mode
@@ -158,11 +171,6 @@ pub fn save_node(
     } else {
         String::new()
     };
-    crate::proxy::Upstream {
-        config: draft.proxy.clone(),
-        password,
-    }
-    .validate()?;
     let reference = supplied
         .as_ref()
         .map(|_| uuid::Uuid::new_v4().simple().to_string())
@@ -172,8 +180,14 @@ pub fn save_node(
         id: id.clone(),
         name: draft.name.trim().into(),
         proxy: draft.proxy,
+        pre_proxy_enabled,
         has_password: reference.is_some(),
     };
+    crate::proxy::Upstream {
+        config: node.connection_config(),
+        password,
+    }
+    .validate()?;
     if let Some(index) = settings.proxies.iter().position(|p| p.id == id) {
         settings.proxies[index] = node;
     } else {
@@ -249,7 +263,7 @@ pub fn resolved_proxies(
             } else {
                 String::new()
             };
-            let mut config = p.proxy.clone();
+            let mut config = p.connection_config();
             config.credential_ref = None;
             Ok(ResolvedProxy {
                 id: p.id.clone(),

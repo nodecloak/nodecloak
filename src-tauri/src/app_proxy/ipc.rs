@@ -30,6 +30,17 @@ pub enum Control {
     Stop,
 }
 const LIMIT: usize = 1_048_576;
+pub fn validate_size<T: Serialize>(value: &T) -> Result<(), String> {
+    let mut bytes = serde_json::to_vec(value).map_err(|_| "无法生成应用代理控制数据")?;
+    let valid = !bytes.is_empty() && bytes.len() <= LIMIT;
+    use zeroize::Zeroize;
+    bytes.zeroize();
+    if valid {
+        Ok(())
+    } else {
+        Err("应用规则或节点信息过多，请减少应用规则后重试".into())
+    }
+}
 pub async fn read_frame<R: AsyncRead + Unpin, T: serde::de::DeserializeOwned>(
     stream: &mut R,
 ) -> Result<T, String> {
@@ -87,6 +98,15 @@ pub fn authenticated(hello: &Hello, token: &str) -> bool {
 mod checks {
     use super::*;
     use tokio::io::AsyncWriteExt;
+    #[test]
+    fn expanded_request_budget_is_checked_before_authorization() {
+        assert!(validate_size(&"a".repeat(LIMIT - 2)).is_ok());
+        assert!(validate_size(&"a".repeat(LIMIT - 1)).is_err());
+        assert!(
+            validate_size(&"\\".repeat(LIMIT / 2)).is_err(),
+            "JSON escaping also counts toward the limit"
+        );
+    }
     #[tokio::test]
     async fn bounded_frames_roundtrip_and_reject_oversized_or_truncated_payloads() {
         let (mut client, mut server) = tokio::io::duplex(256);

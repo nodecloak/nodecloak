@@ -1678,7 +1678,8 @@
   "停止应用代理": "Stop application proxy",
   "开启应用代理": "Start application proxy",
   "取消启动": "Cancel startup",
-  "应用代理当前仅支持 Windows。浏览器副本的代理功能仍可正常使用。": "Application proxy is currently available on Windows. Browser profile proxies remain available.",
+  "应用代理支持 Windows 和 macOS。当前系统仍可使用浏览器副本代理。": "Application proxy supports Windows and macOS. Browser profile proxies remain available on this system.",
+  "开启时将请求 macOS 管理员授权，并临时创建 TUN 网络接口。停止后释放该接口及对应路由；系统 DNS 和 HTTP 代理设置保持不变。": "Starting requests macOS administrator permission and temporarily creates a TUN interface. Stopping releases its interface and routes. System DNS and HTTP proxy settings remain unchanged.",
   "交互演示，不会修改电脑网络。": "Interactive preview. Your computer’s network is unchanged.",
   "开启时将请求 Windows 管理员授权，并临时创建 TUN 网络接口。停止后释放该接口及对应路由；系统 DNS 和 HTTP 代理设置保持不变。": "Starting requests Windows administrator permission and temporarily creates a TUN interface. Stopping releases its interface and routes. System DNS and HTTP proxy settings remain unchanged.",
   "切换路由可能短暂重连。应用自身的代理设置和本机回环连接不会被覆盖。": "Route changes may briefly reconnect existing sessions. An app’s own proxy settings and loopback connections are not overridden.",
@@ -1735,5 +1736,8 @@
   "等待 Windows 管理员授权，正在准备应用代理": "Waiting for Windows administrator permission and preparing application proxy",
   "已取消 Windows 管理员授权，应用代理保持关闭": "Windows administrator permission was cancelled. Application proxy remains off.",
   "应用代理启动已取消": "Application proxy startup was cancelled",
-  "应用代理已停止，已释放本次会话的网络接口和路由": "Application proxy stopped. The session’s network interface and routes have been released."
+  "应用代理已停止，已释放本次会话的网络接口和路由": "Application proxy stopped. The session’s network interface and routes have been released.",
+  "启用前置代理": "Enable first-hop proxy",
+  "关闭时直接连接指定节点，保留前置代理地址和协议。": "When off, connect to the selected node directly. The first-hop address and protocol are kept.",
+  "请先填写前置代理地址": "Enter a first-hop proxy address first"
 }

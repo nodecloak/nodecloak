@@ -12,10 +12,30 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Mutex as AsyncMutex;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 async fn wait_cancelled(cancel: Arc<AtomicBool>) {
     while !cancel.load(Ordering::Acquire) {
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+/// Only read-only preparation may run here. Dropping a cancelled blocking
+/// task must never leave an authorization launcher or privileged side effect.
+#[cfg(any(windows, target_os = "macos"))]
+pub(super) async fn prepare<T: Send + 'static>(
+    cancel: Arc<AtomicBool>,
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    if cancel.load(Ordering::Acquire) {
+        return Err("应用代理启动已取消".into());
+    }
+    let task = tokio::task::spawn_blocking(work);
+    tokio::select! {
+        biased;
+        _=wait_cancelled(cancel.clone())=>Err("应用代理启动已取消".into()),
+        result=task=>{
+            if cancel.load(Ordering::Acquire){return Err("应用代理启动已取消".into())}
+            result.map_err(|_|"应用代理准备任务中断")?
+        }
     }
 }
 
@@ -71,6 +91,7 @@ impl Default for Status {
 #[serde(rename_all = "camelCase")]
 pub struct View {
     pub supported: bool,
+    pub platform: &'static str,
     pub settings: Settings,
     pub apps: Vec<DetectedApp>,
     pub discovery_checked: bool,
@@ -82,7 +103,7 @@ pub struct Runtime {
     pub apps: Mutex<(bool, Vec<DetectedApp>)>,
     cancel: Arc<AtomicBool>,
     history_loaded: AtomicBool,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     active: AsyncMutex<Option<Session>>,
 }
 impl Default for Runtime {
@@ -93,7 +114,7 @@ impl Default for Runtime {
             apps: Mutex::new((false, discovery::empty_apps())),
             cancel: Arc::new(AtomicBool::new(false)),
             history_loaded: AtomicBool::new(false),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             active: AsyncMutex::new(None),
         }
     }
@@ -137,7 +158,14 @@ impl Runtime {
         }
         let apps = self.apps.lock().map_err(|_| "应用识别状态不可用")?;
         Ok(View {
-            supported: cfg!(windows),
+            supported: cfg!(any(windows, target_os = "macos")),
+            platform: if cfg!(target_os = "macos") {
+                "macos"
+            } else if cfg!(windows) {
+                "windows"
+            } else {
+                "unsupported"
+            },
             settings: super::store::load(root)?,
             apps: apps.1.clone(),
             discovery_checked: apps.0,
@@ -164,12 +192,12 @@ impl Runtime {
         Ok(())
     }
     pub async fn start(&self, root: &Path) -> Result<(), String> {
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             let _ = root;
-            return Err("应用代理当前仅支持 Windows".into());
+            return Err("应用代理支持 Windows 和 macOS".into());
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             let _gate = self.gate.lock().await;
             self.editable()?;
@@ -182,14 +210,17 @@ impl Runtime {
             }
             self.cancel.store(false, Ordering::Release);
             let settings = super::store::load(root)?;
-            self.discover().await?;
+            let apps = prepare(self.cancel.clone(), discovery::discover).await?;
+            *self.apps.lock().map_err(|_| "应用识别状态不可用")? = (true, apps);
             let apps = self
                 .apps
                 .lock()
                 .map_err(|_| "应用识别状态不可用")?
                 .1
                 .clone();
-            let (rules, warnings) = resolve(&settings, &apps)?;
+            let settings_copy = settings.clone();
+            let (rules, warnings) =
+                prepare(self.cancel.clone(), move || resolve(&settings_copy, &apps)).await?;
             let mut filtered = settings.clone();
             filtered
                 .rules
@@ -212,7 +243,7 @@ impl Runtime {
             );
             super::config::compile(&rules, &proxies, port, &secret, &session)?;
             let interface = super::config::interface_name(&session)?;
-            super::windows::network::preflight(&super::windows::network::snapshot()?, &interface)?;
+            super::driver::network::preflight(&super::driver::network::snapshot()?, &interface)?;
             {
                 let mut state = self.state.lock().map_err(|_| "应用代理状态不可用")?;
                 state.phase = "starting".into();
@@ -225,7 +256,11 @@ impl Runtime {
             self.event(
                 root,
                 "starting",
-                "等待 Windows 管理员授权，正在准备应用代理",
+                if cfg!(target_os = "macos") {
+                    "等待 macOS 管理员授权，正在准备应用代理"
+                } else {
+                    "等待 Windows 管理员授权，正在准备应用代理"
+                },
             );
             let request = super::ipc::StartRequest {
                 session: session.clone(),
@@ -258,7 +293,7 @@ impl Runtime {
                     state.phase = "error".into();
                     state.error = Some(error.clone());
                     state.needs_cleanup = state.needs_cleanup
-                        || super::windows::network::interface_luid(&interface)
+                        || super::driver::network::interface_luid(&interface)
                             .ok()
                             .flatten()
                             .is_some();
@@ -279,7 +314,7 @@ impl Runtime {
         {
             return Ok(());
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
             let active = self.active.lock().await.take();
             if let Some(mut active) = active {
@@ -369,7 +404,11 @@ fn resolve(
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned(),
-                vec![rule.executable.clone()],
+                if cfg!(target_os = "macos") {
+                    super::macos_bundle::executables(file)?
+                } else {
+                    vec![rule.executable.clone()]
+                },
             )
         } else if let Some(app) = apps.iter().find(|a| a.id == rule.app) {
             (app.name.clone(), app.paths.clone())
@@ -402,16 +441,16 @@ fn resolve(
     Ok((rules, warnings))
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 struct Session {
-    helper: Arc<super::windows::security::Handle>,
-    writer: Option<tokio::io::WriteHalf<tokio::net::windows::named_pipe::NamedPipeServer>>,
+    helper: Arc<super::driver::transport::Handle>,
+    writer: Option<tokio::io::WriteHalf<super::driver::transport::Server>>,
     reader: tokio::task::JoinHandle<()>,
     monitor: tokio::task::JoinHandle<()>,
     interface: String,
     luid: u64,
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 impl Session {
     async fn start(
         request: super::ipc::StartRequest,
@@ -422,7 +461,18 @@ impl Session {
         root: std::path::PathBuf,
     ) -> Result<Self, String> {
         use super::ipc::{self, Reply};
-        let (pipe, helper) = super::windows::transport::connect_helper().await?;
+        // Validate the complete expanded request before opening an elevation
+        // prompt. The receiver independently keeps the same frame limit.
+        ipc::validate_size(&request)?;
+        #[cfg(target_os = "macos")]
+        let connect = super::driver::transport::connect_helper_cancellable(cancel.clone());
+        #[cfg(windows)]
+        let connect = super::driver::transport::connect_helper();
+        let (pipe, helper) = tokio::select! {
+            biased;
+            _=wait_cancelled(cancel.clone())=>return Err("应用代理启动已取消".into()),
+            result=connect=>result?,
+        };
         let helper = Arc::new(helper);
         let mut startup = StartingSession {
             pipe: Some(pipe),
@@ -448,7 +498,7 @@ impl Session {
         };
         if interface != super::config::interface_name(&request.session)?
             || !helper.alive()
-            || super::windows::network::interface_luid(&interface)? != Some(luid)
+            || super::driver::network::interface_luid(&interface)? != Some(luid)
         {
             return Err("应用代理接口身份或进程状态不匹配".into());
         }
@@ -503,8 +553,8 @@ impl Session {
             };
             loop {
                 if !monitor_helper.alive() {
-                    let released = super::windows::network::released(&monitor_interface, luid)
-                        .unwrap_or(false);
+                    let released =
+                        super::driver::network::released(&monitor_interface, luid).unwrap_or(false);
                     if let Ok(mut status) = state.lock() {
                         if status.session.as_deref() == Some(&session) {
                             status.needs_cleanup = !released;
@@ -572,6 +622,8 @@ impl Session {
             drop(writer);
         }
         self.reader.abort();
+        #[cfg(target_os = "macos")]
+        self.helper.close_control();
         let helper = self.helper.clone();
         let exited = tokio::task::spawn_blocking(move || helper.wait(12000))
             .await
@@ -581,7 +633,7 @@ impl Session {
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while tokio::time::Instant::now() < deadline {
-            if super::windows::network::released(&self.interface, self.luid)? {
+            if super::driver::network::released(&self.interface, self.luid)? {
                 self.monitor.abort();
                 return Ok(());
             }
@@ -590,31 +642,35 @@ impl Session {
         Err("应用代理接口仍待释放，请重试停止".into())
     }
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 impl Drop for Session {
     fn drop(&mut self) {
         self.reader.abort();
         self.monitor.abort();
         self.writer.take();
+        #[cfg(target_os = "macos")]
+        self.helper.close_control();
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 struct StartingSession {
-    pipe: Option<tokio::net::windows::named_pipe::NamedPipeServer>,
-    helper: Arc<super::windows::security::Handle>,
+    pipe: Option<super::driver::transport::Server>,
+    helper: Arc<super::driver::transport::Handle>,
     state: Arc<Mutex<Status>>,
     session: String,
     interface: String,
     armed: bool,
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 impl Drop for StartingSession {
     fn drop(&mut self) {
         if !self.armed {
             return;
         }
         self.pipe.take();
+        #[cfg(target_os = "macos")]
+        self.helper.close_control();
         if let Ok(mut state) = self.state.lock() {
             if state.session.as_deref() == Some(&self.session) {
                 state.needs_cleanup = true;
@@ -632,7 +688,7 @@ impl Drop for StartingSession {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             let released = !helper.alive()
-                && super::windows::network::session_released(&interface, None).unwrap_or(false);
+                && super::driver::network::session_released(&interface, None).unwrap_or(false);
             if let Ok(mut status) = state.lock() {
                 if status.session.as_deref() == Some(&session) {
                     status.needs_cleanup = !released;
@@ -735,7 +791,7 @@ mod checks {
         assert_eq!(view.runtime.events[0].event, "synthetic");
         assert_eq!(next.view(root.path()).unwrap().runtime.events.len(), 1);
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[tokio::test]
     async fn cancellation_wakes_startup_without_waiting_for_readiness_timeout() {
         let cancel = Arc::new(AtomicBool::new(false));
@@ -747,6 +803,37 @@ mod checks {
         tokio::time::timeout(Duration::from_millis(500), wait_cancelled(cancel))
             .await
             .unwrap();
+    }
+    #[cfg(any(windows, target_os = "macos"))]
+    #[tokio::test]
+    async fn cancellation_during_blocking_scan_cannot_later_request_authorization() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let authorized = Arc::new(AtomicBool::new(false));
+        let observed = authorized.clone();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let wake = cancel.clone();
+        let start = tokio::spawn(async move {
+            prepare(cancel, move || {
+                let _ = entered.send(());
+                let _ = blocked.recv();
+                Ok(())
+            })
+            .await?;
+            authorized.store(true, Ordering::Release);
+            Ok::<_, String>(())
+        });
+        started.await.unwrap();
+        wake.store(true, Ordering::Release);
+        let result = tokio::time::timeout(Duration::from_millis(500), start)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(result.is_err());
+        assert!(!observed.load(Ordering::Acquire));
+        release.send(()).unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!observed.load(Ordering::Acquire));
     }
     #[test]
     fn connection_evidence_requires_both_the_assigned_proxy_and_the_application_path() {

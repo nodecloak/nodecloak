@@ -1,8 +1,61 @@
-use super::{config, discovery, model::*};
+use super::{discovery, model::*};
+mod config {
+    pub use super::super::config::*;
+    pub fn compile(
+        rules: &[super::ResolvedRule],
+        proxies: &[super::ResolvedProxy],
+        port: u16,
+        secret: &str,
+        session: &str,
+    ) -> Result<serde_json::Value, String> {
+        compile_for(Platform::Windows, rules, proxies, port, secret, session)
+    }
+}
 use crate::proxy::ProxyConfig;
 use serde_json::json;
 
 const ID: &str = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";
+#[test]
+fn mac_interface_units_never_exceed_the_darwin_unit_range() {
+    for value in [0u16, 31743, 32767, 32768, 64511, u16::MAX] {
+        let mut bytes = [0u8; 16];
+        bytes[..2].copy_from_slice(&value.to_be_bytes());
+        let id = uuid::Uuid::from_bytes(bytes);
+        let name = config::interface_name_for(config::Platform::Macos, &id.to_string()).unwrap();
+        let unit = name.strip_prefix("utun").unwrap().parse::<u32>().unwrap();
+        assert!((1024..=32767).contains(&unit), "{value}: {name}");
+    }
+}
+#[test]
+fn mac_paths_preserve_case_and_slashes_for_process_identity() {
+    let path = "/Applications/Codex.app/Contents/MacOS/Codex";
+    assert_eq!(discovery::normalize(path), path);
+    assert_eq!(
+        config::exact_pattern(path),
+        r"^/Applications/Codex\.app/Contents/MacOS/Codex$"
+    );
+    assert_ne!(
+        config::exact_pattern(path),
+        config::exact_pattern(&path.to_lowercase())
+    );
+}
+#[test]
+fn mac_targets_are_application_executables_and_never_shared_system_hosts() {
+    assert!(config::valid_path(
+        "/Applications/Claude.app/Contents/MacOS/Claude"
+    ));
+    assert!(config::valid_path("/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"));
+    for path in [
+        "/usr/bin/python3",
+        "/bin/sh",
+        "/Applications/../bin/sh",
+        "/Applications/NodeCloak.app/Contents/MacOS/nodecloak",
+        "/Applications/Example.app/../other",
+        "/Applications/Example.app/Contents/MacOS/sing-box",
+    ] {
+        assert!(!config::valid_path(path), "unsafe target: {path}");
+    }
+}
 fn proxy() -> ResolvedProxy {
     ResolvedProxy {
         id: ID.into(),
@@ -24,6 +77,55 @@ fn rule(path: &str) -> ResolvedRule {
         proxy_id: ID.into(),
         exact_paths: false,
     }
+}
+#[test]
+fn mac_bundled_tools_have_bounded_exact_rules_without_windows_limits() {
+    let mut app = rule("/Applications/Codex.app/Contents/MacOS/Codex");
+    app.paths = (0..64)
+        .map(|i| format!("/Applications/Codex.app/Contents/Helpers/Tool{i}"))
+        .collect();
+    let v = config::compile_for(
+        config::Platform::Macos,
+        &[app.clone()],
+        &[proxy()],
+        51234,
+        &"a".repeat(64),
+        ID,
+    )
+    .unwrap();
+    let paths = v["route"]["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["outbound"] == format!("proxy-{ID}"))
+        .unwrap()["process_path_regex"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(paths.len(), 64);
+    assert!(paths
+        .iter()
+        .all(|p| p.as_str().unwrap().starts_with("^/Applications/")));
+    assert!(v["inbounds"][0]["interface_name"]
+        .as_str()
+        .unwrap()
+        .starts_with("utun"));
+    assert_eq!(v["route"]["final"], "direct");
+    app.paths = (0..257)
+        .map(|i| format!("/Applications/Codex.app/Contents/Helpers/Tool{i}"))
+        .collect();
+    assert!(config::compile_for(
+        config::Platform::Macos,
+        &[app],
+        &[proxy()],
+        51234,
+        &"a".repeat(64),
+        ID
+    )
+    .is_err());
+    let mut app = rule(r"C:\Apps\Codex.exe");
+    app.paths = (0..33).map(|i| format!(r"C:\Apps\Tool{i}.exe")).collect();
+    assert!(config::compile(&[app], &[proxy()], 51234, &"a".repeat(64), ID).is_err());
 }
 #[test]
 fn same_executable_name_does_not_conflate_codex_with_chatgpt() {
@@ -237,49 +339,52 @@ fn installed_core_accepts_application_configs_without_network_changes() {
         process::{Command, Stdio},
     };
     let binary = std::env::var_os("NODECLOAK_TEST_SINGBOX").expect("Set pinned core path");
-    for mode in ["http", "https", "socks5", "vless", "vmess", "hysteria2"] {
-        let mut p = proxy();
-        p.config.mode = mode.into();
-        p.config.username = String::new();
-        if crate::proxy::node::is_node(mode) {
-            p.config.node = Some(crate::proxy::node::NodeOptions {
-                tls: if mode == "hysteria2" { "tls" } else { "none" }.into(),
-                ..Default::default()
-            });
-            p.password = if mode == "hysteria2" {
-                "synthetic-secret"
-            } else {
-                "0b4fcb93-ec83-4f9b-996a-f89f7aa96025"
+    for (platform, path) in [
+        (config::Platform::Windows, r"C:\Apps\Codex.exe"),
+        (
+            config::Platform::Macos,
+            "/Applications/Codex.app/Contents/MacOS/Codex",
+        ),
+    ] {
+        for mode in ["http", "https", "socks5", "vless", "vmess", "hysteria2"] {
+            let mut p = proxy();
+            p.config.mode = mode.into();
+            p.config.username = String::new();
+            if crate::proxy::node::is_node(mode) {
+                p.config.node = Some(crate::proxy::node::NodeOptions {
+                    tls: if mode == "hysteria2" { "tls" } else { "none" }.into(),
+                    ..Default::default()
+                });
+                p.password = if mode == "hysteria2" {
+                    "synthetic-secret"
+                } else {
+                    "0b4fcb93-ec83-4f9b-996a-f89f7aa96025"
+                }
+                .into();
             }
-            .into();
+            let config =
+                config::compile_for(platform, &[rule(path)], &[p], 51234, &"a".repeat(64), ID)
+                    .unwrap();
+            let mut child = Command::new(&binary)
+                .args(["check", "-c", "stdin"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(&serde_json::to_vec(&config).unwrap())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            println!("{platform:?} {mode}: typed TUN configuration accepted by pinned core");
         }
-        let config = config::compile(
-            &[rule(r"C:\Apps\Codex.exe")],
-            &[p],
-            51234,
-            &"a".repeat(64),
-            ID,
-        )
-        .unwrap();
-        let mut child = Command::new(&binary)
-            .args(["check", "-c", "stdin"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(&serde_json::to_vec(&config).unwrap())
-            .unwrap();
-        let output = child.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "{mode}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        println!("{mode}: typed TUN configuration accepted by pinned core");
     }
 }

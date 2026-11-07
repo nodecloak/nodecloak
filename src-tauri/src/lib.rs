@@ -1,8 +1,8 @@
 mod autostart;
 mod app_proxy;
 pub fn run_app_proxy_helper(suffix:&str,parent:u32)->Result<(),String>{
-    #[cfg(windows)] {tauri::async_runtime::block_on(app_proxy::helper::run(suffix,parent))}
-    #[cfg(not(windows))] {let _=(suffix,parent);Err("应用代理当前仅支持 Windows".into())}
+    #[cfg(any(windows,target_os="macos"))] {tauri::async_runtime::block_on(app_proxy::helper::run(suffix,parent))}
+    #[cfg(not(any(windows,target_os="macos")))] {let _=(suffix,parent);Err("应用代理支持 Windows 和 macOS".into())}
 }
 mod browser_control;
 mod browser_sites;

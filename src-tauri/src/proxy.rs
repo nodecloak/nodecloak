@@ -204,18 +204,45 @@ async fn upstream_socket(up: &Upstream) -> Result<Socket, String> {
 async fn tunnel(up: &Upstream, host: &str, port: u16) -> Result<Socket, String> {
     proxy_tunnel(upstream_socket(up).await?, up, host, port).await
 }
+fn socks_io_error(stage: &str, error: std::io::Error) -> String {
+    use std::io::ErrorKind;
+    // Never include response bytes, an endpoint URI or authentication data.
+    let reason = match error.kind() {
+        ErrorKind::UnexpectedEof
+        | ErrorKind::ConnectionReset
+        | ErrorKind::ConnectionAborted
+        | ErrorKind::BrokenPipe
+        | ErrorKind::NotConnected => "连接已关闭",
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => "等待代理响应超时",
+        _ => "网络读写出错",
+    };
+    let code = error
+        .raw_os_error()
+        .map(|code| format!("（系统错误码 {code}）"))
+        .unwrap_or_default();
+    format!("SOCKS5 {stage}失败：{reason}{code}；请核对代理协议和端口，并检查服务商连接限制")
+}
 async fn proxy_tunnel(mut socket: Socket, up: &Upstream, host: &str, port: u16) -> Result<Socket, String> {
     if up.config.mode == "socks5" {
         let auth = !up.config.username.is_empty();
         socket
             .write_all(if auth { &[5, 1, 2] } else { &[5, 1, 0] })
             .await
-            .map_err(|_| "SOCKS5 握手失败")?;
+            .map_err(|error| socks_io_error("握手发送", error))?;
         let mut response = [0; 2];
         socket
             .read_exact(&mut response)
             .await
-            .map_err(|_| "SOCKS5 握手失败")?;
+            .map_err(|error| socks_io_error("握手响应", error))?;
+        if response[0] != 5 {
+            return Err("代理返回的不是 SOCKS5 响应，请核对代理协议和端口".into());
+        }
+        if response[1] == 255 {
+            return Err("SOCKS5 代理拒绝了认证方式，请核对节点要求的认证配置".into());
+        }
+        if !auth && response[1] == 2 {
+            return Err("SOCKS5 代理要求用户名和密码，请在节点链接中填写认证信息".into());
+        }
         if response != [5, if auth { 2 } else { 0 }] {
             return Err("SOCKS5 认证方式不匹配".into());
         }
@@ -229,12 +256,15 @@ async fn proxy_tunnel(mut socket: Socket, up: &Upstream, host: &str, port: u16) 
             socket
                 .write_all(&bytes)
                 .await
-                .map_err(|_| "SOCKS5 认证失败")?;
+                .map_err(|error| socks_io_error("认证发送", error))?;
             socket
                 .read_exact(&mut response)
                 .await
-                .map_err(|_| "SOCKS5 认证失败")?;
-            if response != [1, 0] {
+                .map_err(|error| socks_io_error("认证响应", error))?;
+            if response[0] != 1 {
+                return Err("SOCKS5 认证响应格式无效，请核对代理协议和端口".into());
+            }
+            if response[1] != 0 {
                 return Err("代理认证失败，请检查用户名和密码".into());
             }
         }
@@ -1050,6 +1080,9 @@ mod tests {
 
 #[cfg(test)]
 mod chain_tests;
+
+#[cfg(test)]
+mod socks_diagnostics_tests;
 
 #[cfg(test)]
 mod api_tests;
