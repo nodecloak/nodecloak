@@ -125,24 +125,39 @@ fn first_hop_toggle_preserves_saved_endpoint_and_credentials_across_reloads() {
         let resolved = store::resolved_proxies(&loaded, &vault).unwrap();
         assert_eq!(resolved[0].config.pre_proxy.is_some(), enabled);
         assert_eq!(resolved[0].password, "private-fixture-password");
-        let rules = [ResolvedRule {
-            id: loaded.rules[0].id.clone(),
-            name: "Codex".into(),
-            paths: vec![r"C:\Apps\Codex.exe".into()],
-            proxy_id: id.clone(),
-            exact_paths: true,
-        }];
-        let compiled =
-            super::config::compile(&rules, &resolved, 51234, &"a".repeat(64), &id).unwrap();
-        let outbounds = compiled["outbounds"].as_array().unwrap();
-        assert_eq!(
-            outbounds.iter().any(|out| out.get("detour").is_some()),
-            enabled
-        );
-        assert_eq!(
-            outbounds.iter().any(|out| out["server_port"] == 1080),
-            enabled
-        );
+        for (platform, path) in [
+            (super::config::Platform::Windows, r"C:\Apps\Codex.exe"),
+            (
+                super::config::Platform::Macos,
+                "/Applications/Codex.app/Contents/MacOS/Codex",
+            ),
+        ] {
+            let rules = [ResolvedRule {
+                id: loaded.rules[0].id.clone(),
+                name: "Codex".into(),
+                paths: vec![path.into()],
+                proxy_id: id.clone(),
+                exact_paths: true,
+            }];
+            let compiled = super::config::compile_for(
+                platform,
+                &rules,
+                &resolved,
+                51234,
+                &"a".repeat(64),
+                &id,
+            )
+            .unwrap();
+            let outbounds = compiled["outbounds"].as_array().unwrap();
+            assert_eq!(
+                outbounds.iter().any(|out| out.get("detour").is_some()),
+                enabled
+            );
+            assert_eq!(
+                outbounds.iter().any(|out| out["server_port"] == 1080),
+                enabled
+            );
+        }
         // Old clients that omit the new flag must not re-enable a saved, disabled hop.
         let mut rename = draft();
         rename.id = Some(id.clone());
