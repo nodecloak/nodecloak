@@ -109,33 +109,41 @@ function nodecloakConfigureRegion(config) {
   return 'configured';
 }
 
-function nodecloakQueryRegion(url, key) {
+function nodecloakQueryRegion(urls, key) {
   const state = globalThis[Symbol.for(key)] = {status:'pending'};
   (async () => {
     try {
-      const response = await fetch(url, {cache:'no-store', signal:AbortSignal.timeout(10000)});
-      if (!response.ok) throw Error('LOOKUP_STATUS');
-      const reader = response.body.getReader();
-      const chunks = []; let size = 0;
-      try {
-        while (true) {
-          const next = await reader.read();
-          if (next.done) break;
-          size += next.value.length;
-          if (size > 65536) throw Error('LOOKUP_SIZE');
-          chunks.push(next.value);
-        }
-      } finally { await reader.cancel(); }
-      const bytes = new Uint8Array(size); let offset = 0;
-      for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
-      const value = JSON.parse(new TextDecoder().decode(bytes));
-      // Return only the fixed provider schema, bounded before crossing RDP.
-      const safe = {success:value.success, ip:value.ip, country_code:value.country_code,
-        city:value.city, latitude:value.latitude, longitude:value.longitude, timezone:{id:value.timezone?.id}};
-      const body = JSON.stringify(safe);
-      if (body.length > 900) throw Error('LOOKUP_SHAPE');
+      let body = null; let last = '';
+      for (const url of urls) {
+        try {
+          const response = await fetch(url, {cache:'no-store', signal:AbortSignal.timeout(6000)});
+          if (!response.ok) throw Error('LOOKUP_STATUS');
+          const reader = response.body.getReader();
+          const chunks = []; let size = 0;
+          try {
+            while (true) {
+              const next = await reader.read();
+              if (next.done) break;
+              size += next.value.length;
+              if (size > 65536) throw Error('LOOKUP_SIZE');
+              chunks.push(next.value);
+            }
+          } finally { await reader.cancel(); }
+          const bytes = new Uint8Array(size); let offset = 0;
+          for (const chunk of chunks) {bytes.set(chunk, offset); offset += chunk.length;}
+          const value = JSON.parse(new TextDecoder().decode(bytes));
+          if (value.success !== true) throw Error('LOOKUP_REJECTED');
+          // Return only the fixed provider schema, bounded before crossing RDP.
+          const timezone = value.timezone && typeof value.timezone === 'object' ? value.timezone.id : value.timezone;
+          body = JSON.stringify({success:true, ip:value.ip, country_code:value.country_code,
+            city:value.city, latitude:value.latitude, longitude:value.longitude, timezone:{id:timezone}});
+          if (body.length > 900) throw Error('LOOKUP_SHAPE');
+          break;
+        } catch (error) { last = url + ': ' + String(error); body = null; }
+      }
+      if (body === null) throw Error('LOOKUP_FAILED ' + last);
       state.body = body; state.status = 'ready';
-    } catch { state.status = 'failed'; }
+    } catch (error) { state.error = String(error).slice(0, 600); state.status = 'failed'; }
   })();
   return 'pending';
 }
