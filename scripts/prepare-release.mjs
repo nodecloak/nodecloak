@@ -24,7 +24,8 @@ const releaseNotes=[
   "完善 SOCKS5 连接错误提示，区分握手中断、协议或端口不匹配、认证方式及认证失败，方便核对节点配置。 / SOCKS5 errors now distinguish interrupted negotiation, protocol or port mismatches, authentication methods and authentication failures to make troubleshooting easier.",
   "macOS 新增应用代理，支持为 Codex、ChatGPT、Claude 或自选 .app 设置节点，并匹配应用包内的网络 Helper；Windows 应用代理继续保留。 / Application Proxy is now available on macOS for Codex, ChatGPT, Claude or a selected .app, including network helpers inside its bundle. Windows Application Proxy remains available.",
   "应用代理默认关闭，开启时请求系统管理员授权；停止或退出后释放本次接口和路由。macOS 网络切换或从休眠唤醒后会停止分流并提示重新开启。 / Application Proxy is off by default and requests administrator permission when started. Stopping or quitting releases its interface and routes. On macOS, changing networks or waking from sleep stops routing and prompts you to restart it.",
-  "修复关闭前置代理后更换 HY2 节点仍受旧前置协议限制的问题；更改前置配置后清除旧检测结果，避免显示过时出口。 / A disabled first hop no longer prevents switching to HY2 because of its cached protocol. Changing first-hop settings clears outdated node-check results."
+  "修复关闭前置代理后更换 HY2 节点仍受旧前置协议限制的问题；更改前置配置后清除旧检测结果，避免显示过时出口。 / A disabled first hop no longer prevents switching to HY2 because of its cached protocol. Changing first-hop settings clears outdated node-check results.",
+  "修复 Windows 上 Firefox 副本重新启动时偶发的启动检测超时。 / Fixes intermittent startup-check timeouts when restarting Firefox profiles on Windows."
 ];
 const manifest={version,notes:releaseNotes.map(note=>`- ${note}`).join('\n'),pub_date:new Date().toISOString(),platforms};
 fs.writeFileSync(path.join(directory,'latest.json'),JSON.stringify(manifest,null,2)+'\n');

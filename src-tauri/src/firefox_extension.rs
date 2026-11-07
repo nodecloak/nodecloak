@@ -472,6 +472,12 @@ fn guarded_launch_impl<T>(profile:&Path,destination:&str,expected_marker:bool,sp
             }
             Err(_) => return Err("Firefox 指纹检测连接失败".into()),
         };
+        // Accepted sockets inherit the listener's nonblocking mode on Windows.
+        // A valid HTTP header/body can span packets; read_exact must wait for
+        // those bytes under the bounded socket timeout rather than drop them.
+        stream
+            .set_nonblocking(false)
+            .map_err(|_| "无法配置检测连接")?;
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
             .map_err(|_| "无法配置检测连接")?;
@@ -676,6 +682,43 @@ mod tests {
         let log = std::fs::read_to_string(profile.join("nodecloak-control.jsonl")).unwrap();
         assert!(log.contains("readiness_page_missing"));
         assert!(!log.contains("private-destination"));
+    }
+
+    #[test]
+    fn startup_gate_accepts_a_report_whose_body_arrives_after_its_headers() {
+        let root = tempfile::tempdir().unwrap();
+        let profile = root.path().canonicalize().unwrap();
+        let mut peer = None;
+        let result = guarded_launch_with_timeout(&profile, "https://example.test/", false, |start| {
+            let url = reqwest::Url::parse(start).unwrap();
+            peer = Some(std::thread::spawn(move || -> Result<Vec<u8>, std::io::Error> {
+                let host = format!("127.0.0.1:{}", url.port().unwrap());
+                let path = url.path().replacen("/start/", "/ready/", 1);
+                let mut document = TcpStream::connect(&host)?;
+                document.set_read_timeout(Some(Duration::from_secs(3)))?;
+                write!(document, "GET {} HTTP/1.1\r\nHost: {host}\r\n\r\n", url.path())?;
+                let mut html = Vec::new();
+                document.read_to_end(&mut html)?;
+                assert!(html.starts_with(b"HTTP/1.1 200"));
+                let mut socket = TcpStream::connect(&host)?;
+                socket.set_read_timeout(Some(Duration::from_secs(3)))?;
+                let body = br#"{"marker":false,"webdriver":false}"#;
+                write!(socket, "POST {path} HTTP/1.1\r\nHost: {host}\r\nOrigin: http://{host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", body.len())?;
+                socket.flush()?;
+                // TCP does not guarantee that the JSON body shares the headers' packet.
+                std::thread::sleep(Duration::from_millis(250));
+                socket.write_all(body)?;
+                let mut response = Vec::new();
+                socket.read_to_end(&mut response)?;
+                Ok(response)
+            }));
+            Ok(())
+        }, Duration::from_secs(2));
+        let response = peer.unwrap().join().unwrap();
+        assert!(result.is_ok(), "fragmented report was dropped: {result:?}");
+        let response = String::from_utf8(response.unwrap()).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.contains("https://example.test/"));
     }
 
     #[test]
