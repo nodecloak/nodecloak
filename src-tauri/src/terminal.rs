@@ -78,6 +78,8 @@ fn search_roots() -> Vec<PathBuf> {
             PathBuf::from("/usr/local/bin"),
         ]);
     }
+    #[cfg(target_os = "linux")]
+    roots.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
     roots
 }
 

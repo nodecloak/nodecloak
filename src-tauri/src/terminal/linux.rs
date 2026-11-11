@@ -1,5 +1,13 @@
-use super::{environment, executable_file, Tool};
-use std::{collections::BTreeMap, ffi::OsString, fs, path::{Path, PathBuf}};
+#[cfg(target_os = "linux")]
+use super::environment;
+#[cfg(unix)]
+use super::executable_file;
+use super::Tool;
+#[cfg(target_os = "linux")]
+use std::collections::BTreeMap;
+use std::{ffi::OsString, path::Path};
+#[cfg(unix)]
+use std::{fs, path::PathBuf};
 
 pub(super) fn launcher_contents(tool: Tool) -> String {
     let start = tool.command().map(|name| format!(
@@ -8,45 +16,89 @@ pub(super) fn launcher_contents(tool: Tool) -> String {
     format!("#!/bin/bash\n# NodeCloak managed terminal launcher\nexport PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\nreadonly NODECLOAK_TERMINAL_DIRECTORY=\"${{1:-$HOME}}\"\nreadonly NODECLOAK_TERMINAL_ENVFILE=\"${{2:-}}\"\nif [[ -n \"$NODECLOAK_TERMINAL_ENVFILE\" ]]; then\n  builtin source -- \"$NODECLOAK_TERMINAL_ENVFILE\" || {{ /bin/rm -f -- \"$NODECLOAK_TERMINAL_ENVFILE\"; exit 1; }}\n  /bin/rm -f -- \"$NODECLOAK_TERMINAL_ENVFILE\"\nfi\nbuiltin cd -- \"$NODECLOAK_TERMINAL_DIRECTORY\" || exit 1\n{start}")
 }
 
+#[cfg(unix)]
 fn terminal_in(roots: &[PathBuf]) -> Option<(PathBuf, &'static str)> {
     // Ubuntu's default terminal accepts literal argv after `--`. The Debian
     // alternative and xterm accept argv after `-e`; no command-string parsing.
-    [ ("gnome-terminal", "--"), ("kgx", "--"), ("x-terminal-emulator", "-e"), ("konsole", "-e"), ("xterm", "-e") ]
-        .into_iter().find_map(|(name, separator)| roots.iter().map(|root| root.join(name))
-            .find(|file| executable_file(file)).map(|file| (file, separator)))
+    [
+        ("gnome-terminal", "--"),
+        ("kgx", "--"),
+        ("x-terminal-emulator", "-e"),
+        ("konsole", "-e"),
+        ("xterm", "-e"),
+    ]
+    .into_iter()
+    .find_map(|(name, separator)| {
+        roots
+            .iter()
+            .map(|root| root.join(name))
+            .find(|file| executable_file(file))
+            .map(|file| (file, separator))
+    })
 }
 
 #[cfg(target_os = "linux")]
 pub(crate) fn open(path: &Path, directory: &Path, payload: Option<&Path>) -> Result<(), String> {
-    let mut roots: Vec<_> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    let mut roots: Vec<_> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
     roots.extend([PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
-    let (terminal, separator) = terminal_in(&roots).ok_or("未找到可用终端，请安装 GNOME Terminal 后重试。")?;
+    let (terminal, separator) =
+        terminal_in(&roots).ok_or("未找到可用终端，请安装 GNOME Terminal 后重试。")?;
     crate::platform::command(terminal.to_str().ok_or("终端路径无效")?)
         .args(arguments(separator, path, directory, payload))
         .current_dir(directory)
-        .spawn().map_err(|_| "无法打开终端，请检查桌面会话和终端安装。")?;
+        .spawn()
+        .map_err(|_| "无法打开终端，请检查桌面会话和终端安装。")?;
     Ok(())
 }
 
-fn arguments(separator: &str, path: &Path, directory: &Path, payload: Option<&Path>) -> Vec<OsString> {
-    let mut args: Vec<OsString> = [separator, "/bin/bash", "--noprofile", "--norc"].into_iter().map(Into::into).collect();
+fn arguments(
+    separator: &str,
+    path: &Path,
+    directory: &Path,
+    payload: Option<&Path>,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = [separator, "/bin/bash", "--noprofile", "--norc"]
+        .into_iter()
+        .map(Into::into)
+        .collect();
     args.extend([path.as_os_str().into(), directory.as_os_str().into()]);
-    if let Some(payload) = payload { args.push(payload.as_os_str().into()); }
+    if let Some(payload) = payload {
+        args.push(payload.as_os_str().into());
+    }
     args
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn launch(folder: &Path, path: &Path, directory: &Path, overrides: &BTreeMap<String, String>) -> Result<(), String> {
-    use std::{io::Write, os::unix::fs::{OpenOptionsExt, PermissionsExt}};
+pub(super) fn launch(
+    folder: &Path,
+    path: &Path,
+    directory: &Path,
+    overrides: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    use std::{
+        io::Write,
+        os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    };
     // A running terminal server does not necessarily inherit the caller's
     // environment. Pass overrides in a private file, never terminal argv.
     let sessions = folder.join("sessions");
     crate::profiles::guard_tree(&sessions)?;
     fs::create_dir_all(&sessions).map_err(|_| "无法创建终端会话目录")?;
-    fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700)).map_err(|_| "无法保护终端会话目录")?;
+    fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700))
+        .map_err(|_| "无法保护终端会话目录")?;
     let payload = sessions.join(format!("{}.sh", uuid::Uuid::new_v4()));
-    let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&payload).map_err(|_| "无法创建终端环境会话")?;
-    if file.write_all(environment::mac_exports(overrides).as_bytes()).is_err() {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&payload)
+        .map_err(|_| "无法创建终端环境会话")?;
+    if file
+        .write_all(environment::mac_exports(overrides).as_bytes())
+        .is_err()
+    {
         let _ = fs::remove_file(&payload);
         return Err("无法写入终端环境会话".into());
     }
@@ -90,16 +142,41 @@ mod tests {
         let bin = root.join(".local/bin");
         fs::create_dir_all(&bin).unwrap();
         let cli = bin.join("codex");
-        fs::write(&cli, "#!/bin/bash\nprintf '%s\\n' \"$PWD\" \"$CUSTOM_LITERAL\" \"$TZ\"\n").unwrap();
+        fs::write(
+            &cli,
+            "#!/bin/bash\nprintf '%s\\n' \"$PWD\" \"$CUSTOM_LITERAL\" \"$TZ\"\n",
+        )
+        .unwrap();
         fs::set_permissions(&cli, fs::Permissions::from_mode(0o700)).unwrap();
         let script = root.join("codex.sh");
         fs::write(&script, launcher_contents(Tool::Codex)).unwrap();
         let payload = root.join("private.sh");
         let literal = "quote' \"; $(touch injected) `touch injected`\n第二行";
-        fs::write(&payload, environment::mac_exports(&BTreeMap::from([("CUSTOM_LITERAL".into(), literal.into()), ("TZ".into(), "Europe/Paris".into())]))).unwrap();
-        let output = std::process::Command::new("/bin/bash").args(["--noprofile", "--norc"]).arg(&script).arg(&project).arg(&payload).env("HOME", root).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        assert_eq!(String::from_utf8_lossy(&output.stdout), format!("{}\n{literal}\nEurope/Paris\n", project.display()));
+        fs::write(
+            &payload,
+            environment::mac_exports(&BTreeMap::from([
+                ("CUSTOM_LITERAL".into(), literal.into()),
+                ("TZ".into(), "Europe/Paris".into()),
+            ])),
+        )
+        .unwrap();
+        let output = std::process::Command::new("/bin/bash")
+            .args(["--noprofile", "--norc"])
+            .arg(&script)
+            .arg(&project)
+            .arg(&payload)
+            .env("HOME", root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("{}\n{literal}\nEurope/Paris\n", project.display())
+        );
         assert!(!payload.exists());
         assert!(!project.join("injected").exists());
     }

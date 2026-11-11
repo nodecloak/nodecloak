@@ -13,8 +13,20 @@ mod quit;
 #[cfg(target_os = "linux")]
 mod linux;
 
+/// Executable to persist in external integrations, including an AppImage after
+/// its current mount has disappeared. Internal child helpers use current_exe.
+pub(crate) fn current_app_executable() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|_| "无法定位 NodeCloak 程序")?;
+    #[cfg(target_os = "linux")]
+    return linux::persistent_executable(exe, std::env::var_os("APPIMAGE").map(PathBuf::from), std::env::var_os("APPDIR").map(PathBuf::from));
+    #[cfg(not(target_os = "linux"))]
+    Ok(exe)
+}
+
 pub fn command(program: &str) -> Command {
     let mut cmd = Command::new(program);
+    #[cfg(target_os = "linux")]
+    desktop_linux::prepare_command(&mut cmd, std::env::current_exe().ok().as_deref(), std::env::var_os("APPIMAGE").is_some());
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -445,7 +457,7 @@ pub fn ensure_profile_closed(profile: &Path) -> Result<(), String> {
     let processes = output("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process -Filter \"Name='chrome.exe' OR Name='msedge.exe' OR Name='firefox.exe'\" | ForEach-Object { $_.CommandLine }"])?;
     #[cfg(target_os = "macos")]
     let processes = output("/bin/ps", &["-ax", "-o", "command="])?;
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     let processes = String::new();
     #[cfg(target_os = "linux")]
     let running = !profile_process_ids(profile)?.is_empty();
@@ -806,6 +818,20 @@ mod profile_tests {
             profile_ids_from(&processes, Path::new(r"\\?\C:\temp\profile")),
             vec![42]
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn unix_profile_matching_is_exact_case_sensitive_and_excludes_helpers() {
+        let path = Path::new("/tmp/NodeCloak Profile");
+        let processes = vec![
+            (1, vec!["chrome".into(), "--user-data-dir=/tmp/NodeCloak Profile".into()]),
+            (2, vec!["firefox".into(), "--profile".into(), "/tmp/NodeCloak Profile".into()]),
+            (3, vec!["chrome".into(), "--user-data-dir=/tmp/NodeCloak Profile-other".into()]),
+            (4, vec!["chrome".into(), "--user-data-dir=/tmp/nodecloak profile".into()]),
+            (5, vec!["chrome".into(), "--type=renderer".into(), "--user-data-dir=/tmp/NodeCloak Profile".into()]),
+            (6, vec!["firefox".into(), "https://example.invalid/tmp/NodeCloak Profile".into()]),
+        ];
+        assert_eq!(profile_ids_from(&processes, path), vec![1, 2]);
     }
 }
 

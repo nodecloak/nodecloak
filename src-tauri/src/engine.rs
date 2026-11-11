@@ -222,7 +222,7 @@ pub fn scan_local(root: &Path, browser: &str) -> Result<Scan, String> {
         check("webrtc", if rtc { "configured" } else { "warning" }, if rtc { "已限制非代理 UDP" } else { "尚未设置隐私策略" }, "读取专用配置中的 WebRTC 策略，配置后仍需网页实测。此设置可能影响网页语音或视频通话。", available),
         check("dns", if dns { "configured" } else { "warning" }, if dns { "Cloudflare · 加密 DNS" } else { "未配置加密 DNS" }, "将专用浏览器设置为严格 DNS over HTTPS。企业策略或代理可能覆盖设置；不等同于已完成 DNS 泄露实测。", available),
         check("language", if language_ok { "configured" } else { "warning" }, language.unwrap_or("跟随浏览器默认设置"), if forced_chinese { "配置文件包含强制中文语言，普通偏好无法覆盖。系统或企业策略还需在浏览器 policy 页面确认。" } else { "同时核验 selected_languages 与 accept_languages。若网页仍显示中文，请确认使用专用窗口、完全退出后重启，并检查策略或扩展。" }, available && !forced_chinese),
-        check("timezone", if zone.is_err() { "unknown" } else if zone_problem { "warning" } else { "healthy" }, zone.unwrap_or_else(|_| "读取失败".into()), "读取系统时区标识。修改时区只改变本地时间显示，不会校准电脑时钟；时间准确性请查看独立的系统时钟检测。修改会影响所有应用，可从记录恢复。", cfg!(any(target_os = "windows", target_os = "macos"))),
+        check("timezone", if zone.is_err() { "unknown" } else if zone_problem { "warning" } else { "healthy" }, zone.unwrap_or_else(|_| "读取失败".into()), "读取系统时区标识。修改时区只改变本地时间显示，不会校准电脑时钟；时间准确性请查看独立的系统时钟检测。修改会影响所有应用，可从记录恢复。", cfg!(any(target_os = "windows", target_os = "macos", target_os = "linux"))),
         check("offset", if offset.is_err() { "unknown" } else { "healthy" }, offset.map(offset_label).unwrap_or_else(|_| "读取失败".into()), "这是本机系统时区对应的 UTC 偏移。UTC+8 本身不是异常，也不能判断时钟是否准确；请查看系统时钟检测。", false),
         crate::clock_probe::unknown(),
         check("locale", "manual", "需要在专用浏览器中实测", "Intl 区域设置与首选语言不是同一个值。请打开本地复检页并导入报告；不能凭配置文件判定此项已通过。", false),

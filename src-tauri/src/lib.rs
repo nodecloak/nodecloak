@@ -48,16 +48,16 @@ fn is_portable_build() -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn supports_in_app_updates() -> bool {
+fn supports_in_app_updates(app: tauri::AppHandle) -> bool {
     #[cfg(target_os = "linux")]
     {
         // The Linux updater replaces an AppImage. deb installations are updated
         // through the downloaded package, never by installing an AppImage over it.
-        std::env::var_os("APPIMAGE").map(std::path::PathBuf::from)
+        app.env().appimage.map(std::path::PathBuf::from)
             .is_some_and(|path| path.is_absolute() && path.is_file())
     }
     #[cfg(not(target_os = "linux"))]
-    true
+    { let _ = app; true }
 }
 
 #[tauri::command]

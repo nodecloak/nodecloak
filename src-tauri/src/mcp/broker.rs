@@ -1075,7 +1075,7 @@ pub fn action(app: &tauri::AppHandle, action: Value) -> Result<Value, String> {
                 return Err("GRANT_NOT_FOUND".into());
             }
             return Ok(
-                json!({"mcpServers":{"nodecloak":{"command":std::env::current_exe().map_err(|_|"EXECUTABLE_NOT_FOUND")?,"args":["--mcp","--instance",s.namespace,"--client",id]}}}),
+                json!({"mcpServers":{"nodecloak":{"command":crate::platform::current_app_executable()?,"args":["--mcp","--instance",s.namespace,"--client",id]}}}),
             );
         }
         _ => return Err("UNKNOWN_ACTION".into()),

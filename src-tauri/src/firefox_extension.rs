@@ -100,28 +100,10 @@ fn registered_host_is_ours(existing: &Path, expected: &Path) -> bool {
         .is_some_and(|(a, b)| a == b)
 }
 
-#[cfg(target_os = "linux")]
-fn linux_native_host_path(exe: PathBuf, appimage: Option<PathBuf>, appdir: Option<PathBuf>) -> Result<PathBuf, String> {
-    use std::os::unix::fs::PermissionsExt;
-    // current_exe points inside the transient AppImage mount. Firefox may start
-    // the host after the main application exits, so register the durable image.
-    // APPIMAGE can be inherited by a separately installed app. Only use it
-    // when this executable actually belongs to the corresponding mount.
-    let mounted = appdir.filter(|p| p.is_absolute()).is_some_and(|dir| exe.starts_with(dir));
-    let path = if mounted { appimage.unwrap_or(exe) } else { exe };
-    if !path.is_absolute() || !std::fs::metadata(&path)
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0) {
-        return Err("Firefox 扩展宿主路径无效，请重新打开已安装的 NodeCloak 或可执行 AppImage".into());
-    }
-    Ok(path)
-}
-
 fn register_host(root: &Path) -> Result<(), String> {
     let folder = root.join("firefox-privacy");
     let path = folder.join("com.nodecloak.fingerprint.json");
-    let exe = std::env::current_exe().map_err(|_| "无法定位 Firefox 扩展宿主")?;
-    #[cfg(target_os = "linux")]
-    let exe = linux_native_host_path(exe, std::env::var_os("APPIMAGE").map(PathBuf::from), std::env::var_os("APPDIR").map(PathBuf::from))?;
+    let exe = crate::platform::current_app_executable()?;
     // The lib-test harness has no app main() native-host dispatch. Installed
     // browser fixtures supply a separately built app executable explicitly.
     #[cfg(test)]
@@ -638,22 +620,6 @@ fn reply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn appimage_native_manifest_uses_the_persistent_executable() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = tempfile::tempdir().unwrap();
-        let image = root.path().join("NodeCloak with spaces.AppImage");
-        std::fs::write(&image, b"fixture").unwrap();
-        std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mounted = PathBuf::from("/tmp/.mount_NodeCloak/usr/bin/nodecloak");
-        let mount = Some(PathBuf::from("/tmp/.mount_NodeCloak"));
-        assert_eq!(linux_native_host_path(mounted, Some(image.clone()), mount).unwrap(), image);
-        assert_eq!(linux_native_host_path(image.clone(), Some(PathBuf::from("/missing/inherited.AppImage")), Some(PathBuf::from("/unrelated/mount"))).unwrap(), image);
-        assert!(linux_native_host_path(PathBuf::from("relative.AppImage"), None, None).is_err());
-        std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(linux_native_host_path(image, None, None).is_err());
-    }
     #[cfg(windows)]
     #[test]
     fn setup_disconnects_before_waiting_for_browser_profile_release() {
