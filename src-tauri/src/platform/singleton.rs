@@ -81,7 +81,7 @@ fn stale_link(
     Ok(())
 }
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn hostname() -> Result<String, String> {
+pub(super) fn hostname() -> Result<String, String> {
     let mut bytes = [0u8; 256];
     if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len()) } != 0 {
         return Err(failure(std::io::Error::last_os_error()));
@@ -452,7 +452,8 @@ mod tests {
             platform::spawn_browser_with_proxy(browser, &other, &other_site.url, "direct", None).unwrap();
             assert!(!other_site.reports.recv_timeout(std::time::Duration::from_secs(25)).unwrap());
             let other_pids = platform::profile_process_ids(&other).unwrap();
-            assert!(!other_pids.is_empty());
+            assert!(!other_pids.is_empty(), "{browser} served the fixture but no owner was found; singleton={:?}, socket={:?}",
+                std::fs::read_link(other.join("SingletonLock")), std::fs::read_link(other.join("SingletonSocket")));
             for cycle in 0..3 {
                 platform::ensure_profile_closed(&profile).unwrap();
                 platform::spawn_browser_with_proxy(browser, &profile, &site.url, "direct", None).unwrap();

@@ -15,6 +15,57 @@ use x11rb::{
     CURRENT_TIME,
 };
 
+fn socket_inode(line: &str, socket: &Path) -> Option<u64> {
+    let mut rest = line;
+    let mut fields = Vec::with_capacity(7);
+    for _ in 0..7 {
+        rest = rest.trim_start();
+        let end = rest.find(char::is_whitespace)?;
+        fields.push(&rest[..end]);
+        rest = &rest[end..];
+    }
+    // Preserve spaces in socket paths; split_whitespace would lose them.
+    (fields[3] == "00010000" && fields[4] == "0001" && Path::new(rest.trim_start()) == socket)
+        .then(|| fields[6].parse().ok())
+        .flatten()
+}
+
+pub(super) fn chromium_profile_owner(
+    profile: &Path,
+    candidates: &[super::BrowserProcess],
+) -> Option<u32> {
+    let lock = profile.join("SingletonLock");
+    let before = fs::symlink_metadata(&lock).ok()?;
+    if !before.file_type().is_symlink() {
+        return None;
+    }
+    let target = fs::read_link(&lock).ok()?;
+    let (host, id) = target.to_str()?.rsplit_once('-')?;
+    if host != super::singleton::hostname().ok()? {
+        return None;
+    }
+    let pid = id.parse::<u32>().ok().filter(|pid| *pid > 0)?;
+    if !candidates.iter().any(|(id, _)| *id == pid) {
+        return None;
+    }
+    let socket = profile.join("SingletonSocket").canonicalize().ok()?;
+    let table = fs::read_to_string(format!("/proc/{pid}/net/unix")).ok()?;
+    let inode = table.lines().find_map(|line| socket_inode(line, &socket))?;
+    let descriptor = PathBuf::from(format!("socket:[{inode}]"));
+    let owns_socket = fs::read_dir(format!("/proc/{pid}/fd"))
+        .ok()?
+        .filter_map(Result::ok)
+        .any(|fd| fs::read_link(fd.path()).is_ok_and(|path| path == descriptor));
+    // The browser can replace its lock while starting/exiting. Accept only the
+    // same lock and live socket ownership from this observation.
+    let after = fs::symlink_metadata(&lock).ok()?;
+    (owns_socket
+        && before.dev() == after.dev()
+        && before.ino() == after.ino()
+        && fs::read_link(lock).ok()? == target)
+        .then_some(pid)
+}
+
 pub(super) fn persistent_executable(
     exe: PathBuf,
     appimage: Option<PathBuf>,
@@ -260,6 +311,56 @@ pub(super) fn focus(ids: &[u32]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rewritten_chromium_title_uses_owned_profile_socket_and_rejects_reused_pid() {
+        use std::os::unix::{fs::symlink, net::UnixListener};
+        let root = tempfile::tempdir().unwrap();
+        let profile = root.path().join("browser with spaces");
+        let other = root.path().join("another profile");
+        fs::create_dir_all(&profile).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        let socket = root.path().join("browser socket");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let pid = std::process::id();
+        let host = super::super::singleton::hostname().unwrap();
+        symlink(format!("{host}-{pid}"), profile.join("SingletonLock")).unwrap();
+        symlink(&socket, profile.join("SingletonSocket")).unwrap();
+        // Chromium rewrites argv into one title with unquoted spaces. Ownership
+        // must not depend on guessing where its profile argument ends.
+        let processes = vec![(
+            pid,
+            vec![format!(
+                "/opt/google/chrome/chrome --user-data-dir={} --profile-directory=Default",
+                profile.display()
+            )],
+        )];
+        assert_eq!(
+            super::super::profile_ids_from(&processes, &profile),
+            vec![pid]
+        );
+        // A stale lock pointing at a live browser PID is insufficient: its
+        // profile socket must be owned by that same process too.
+        symlink(format!("{host}-{pid}"), other.join("SingletonLock")).unwrap();
+        let other_socket = root.path().join("other browser socket");
+        let mut child = std::process::Command::new("python3").args(["-c", "import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen(); print('ready',flush=True); sys.stdin.read()"])
+            .arg(&other_socket).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+        use std::io::BufRead;
+        let mut ready = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut ready)
+            .unwrap();
+        symlink(&other_socket, other.join("SingletonSocket")).unwrap();
+        let stale = super::super::profile_ids_from(&processes, &other);
+        drop(child.stdin.take());
+        child.wait().unwrap();
+        assert_eq!(ready.trim(), "ready");
+        assert!(
+            stale.is_empty(),
+            "a live socket owned by another PID must not validate a stale lock"
+        );
+        drop(listener);
+        assert!(super::super::profile_ids_from(&processes, &profile).is_empty());
+    }
     #[test]
     fn external_integrations_use_the_durable_appimage_and_ignore_unrelated_environment() {
         let root = tempfile::tempdir().unwrap();

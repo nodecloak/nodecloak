@@ -37,7 +37,7 @@ jobs:
       - run: npm run test:session-codec && npm run test:firefox-extension
       - run: npm run build
       - name: Rust tests and native Ubuntu checks
-        run: dbus-run-session -- xvfb-run -a bash scripts/check-linux-runtime.sh
+        run: xvfb-run -a dbus-run-session -- bash scripts/check-linux-runtime.sh
       - name: Build deb and AppImage
         run: node scripts/build-desktop.mjs
         env:
@@ -46,7 +46,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
           APPIMAGE_EXTRACT_AND_RUN: '1'
       - name: Install and launch final packages
-        run: dbus-run-session -- xvfb-run -a python3 scripts/check-linux-packages.py
+        run: xvfb-run -a dbus-run-session -- python3 scripts/check-linux-packages.py
       - run: node scripts/collect-release-assets.mjs linux-x64
         env:
           RELEASE_TAG: ${{ inputs.sign_updates && github.ref_name || '' }}

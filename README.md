@@ -121,7 +121,7 @@ Chrome、Edge、Firefox 均支持。连接方式、权限和工具清单见 [MCP
 
 **数据保存在什么地方？**
 
-Windows 默认使用 `%APPDATA%\com.nodecloak`，macOS 默认使用 `~/Library/Application Support/com.nodecloak`。已有旧版数据时继续使用原目录。代理密码保存在系统凭据存储，云同步内容在客户端加密后上传。
+Windows 默认使用 `%APPDATA%\com.nodecloak`，macOS 默认使用 `~/Library/Application Support/com.nodecloak`，Ubuntu 默认使用 `~/.local/share/com.nodecloak`（设置了 `XDG_DATA_HOME` 时使用该目录下的 `com.nodecloak`）。已有旧版数据时继续使用原目录。代理密码保存在系统凭据存储，云同步内容在客户端加密后上传。
 
 ## 文档
 

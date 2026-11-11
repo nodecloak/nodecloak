@@ -1124,15 +1124,35 @@ fn spawn_browser_impl(
 
 pub type BrowserProcess = (u32, Vec<String>);
 pub fn browser_processes() -> Vec<BrowserProcess> {
+    #[cfg(target_os = "linux")]
+    let system = {
+        let mut system = sysinfo::System::new();
+        // Linux task entries share their process's executable and argv. They
+        // are thread IDs, not independently owned browser instances/windows.
+        system.refresh_processes_specifics(sysinfo::ProcessesToUpdate::All, true,
+            sysinfo::ProcessRefreshKind::everything().without_tasks());
+        system
+    };
+    #[cfg(not(target_os = "linux"))]
     let system = sysinfo::System::new_all();
     system
         .processes()
         .values()
         .filter(|p| {
+            #[cfg(target_os = "linux")]
+            {
+                // Linux comm is a mutable, truncated thread name. Verify the
+                // executable before trusting its profile argv or singleton.
+                return p.exe().and_then(|path| path.file_name()).and_then(|n| n.to_str())
+                    .is_some_and(|name| matches!(name, "chrome" | "google-chrome" | "msedge" | "microsoft-edge" | "firefox" | "firefox-bin" | "firefox-esr"));
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
             let name = p.name().to_string_lossy().to_lowercase();
             ["chrome", "edge", "firefox"]
                 .iter()
                 .any(|b| name.contains(b))
+            }
         })
         .map(|p| {
             (
@@ -1159,7 +1179,7 @@ pub fn profile_ids_from(processes: &[BrowserProcess], profile: &Path) -> Vec<u32
         }
     };
     let expected = normalize(&profile.to_string_lossy());
-    processes
+    let mut ids: Vec<_> = processes
         .iter()
         .filter(|(_, args)| {
             !args.iter().any(|s| s.starts_with("--type="))
@@ -1179,7 +1199,15 @@ pub fn profile_ids_from(processes: &[BrowserProcess], profile: &Path) -> Vec<u32
                 })
         })
         .map(|(id, _)| *id)
-        .collect()
+        .collect();
+    #[cfg(target_os = "linux")]
+    if let Some(pid) = linux::chromium_profile_owner(profile, processes) {
+        // Chromium rewrites /proc/cmdline into a single, unquoted process
+        // title. Its exact profile is instead proven by the native singleton
+        // socket owned by this same PID, not by guessing argument boundaries.
+        if !ids.contains(&pid) { ids.push(pid); }
+    }
+    ids
 }
 pub fn profile_process_ids(profile: &Path) -> Result<Vec<u32>, String> {
     Ok(profile_ids_from(&browser_processes(), profile))
