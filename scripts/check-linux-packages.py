@@ -19,11 +19,24 @@ subprocess.run(["sudo", "dpkg", "-i", str(deb)], check=True)
 assert Path("/usr/bin/nodecloak").is_file()
 assert any("nodecloak" in p.read_text().lower() for p in Path("/usr/share/applications").glob("*.desktop"))
 report = {"version": version, "architecture": "amd64", "packages": {}}
+keyring_home = tempfile.TemporaryDirectory(prefix="nodecloak-package-keyring-")
+keyring_control = Path(keyring_home.name) / "control"
+keyring_control.mkdir(mode=0o700)
+keyring_env = dict(os.environ, HOME=keyring_home.name,
+                   XDG_CONFIG_HOME=keyring_home.name + "/.config",
+                   XDG_DATA_HOME=keyring_home.name + "/.local/share",
+                   XDG_CACHE_HOME=keyring_home.name + "/.cache")
+# The surrounding dbus-run-session keeps this unlocked test keyring separate
+# from the desktop login keyring; package HOME directories remain independent.
+subprocess.run(["gnome-keyring-daemon", "--unlock", "--components=secrets",
+                "--control-directory=" + str(keyring_control)],
+               input="\n", text=True, env=keyring_env, check=True, timeout=15)
 wm = subprocess.Popen(["openbox"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
     for name, program in [("deb", Path("/usr/bin/nodecloak")), ("AppImage", appimage)]:
         with tempfile.TemporaryDirectory(prefix="nodecloak-package-") as directory:
-            env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory + "/config",
+            # auto-launch 0.6 uses HOME/.config/autostart on Linux.
+            env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory + "/.config",
                        XDG_DATA_HOME=directory + "/data", XDG_CACHE_HOME=directory + "/cache",
                        APPIMAGE_EXTRACT_AND_RUN="1", WEBKIT_DISABLE_DMABUF_RENDERER="1")
             # A terminal/file manager may itself be an AppImage. A deb must
@@ -67,6 +80,8 @@ try:
                         if entries:
                             break
                         time.sleep(0.25)
+                    log.seek(0)
+                    diagnostic = log.read().decode(errors="replace")
                     assert len(entries) == 1, f"{name}: missing or duplicate startup entry: {diagnostic}"
                     startup = entries[0].read_text()
                     assert str(program.resolve()) in startup and str(foreign) not in startup, startup
@@ -84,5 +99,6 @@ try:
 finally:
     wm.terminate()
     wm.wait(timeout=5)
+    keyring_home.cleanup()
 (root / "linux-package-verification.json").write_text(json.dumps(report, indent=2) + "\n")
 print(json.dumps(report, indent=2))
