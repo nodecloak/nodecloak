@@ -26,6 +26,12 @@ try:
             env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory + "/config",
                        XDG_DATA_HOME=directory + "/data", XDG_CACHE_HOME=directory + "/cache",
                        APPIMAGE_EXTRACT_AND_RUN="1", WEBKIT_DISABLE_DMABUF_RENDERER="1")
+            # A terminal/file manager may itself be an AppImage. A deb must
+            # neither register that parent for autostart nor target its updater.
+            foreign = Path(directory) / "Parent.AppImage"
+            foreign.write_text("#!/bin/sh\nexit 42\n")
+            foreign.chmod(0o755)
+            env.update(APPIMAGE=str(foreign), APPDIR=directory + "/foreign-mount")
             profile = Path(directory) / "browser-firefox"
             profile.mkdir()
             settings = {"version": 1, "seed": "11" * 32, "enabled": True,
@@ -54,7 +60,19 @@ try:
                     log.seek(0)
                     diagnostic = log.read().decode(errors="replace")
                     assert visible and process.poll() is None, f"{name} failed to show its window: {diagnostic}"
-                    report["packages"][name] = {"installedOrExtracted": True, "nativeMessaging": True, "visibleWindow": True, "aliveAfterStartup": True}
+                    startup_dir = Path(env["XDG_CONFIG_HOME"]) / "autostart"
+                    deadline = time.monotonic() + 15
+                    while time.monotonic() < deadline:
+                        entries = list(startup_dir.glob("*.desktop"))
+                        if entries:
+                            break
+                        time.sleep(0.25)
+                    assert len(entries) == 1, f"{name}: missing or duplicate startup entry: {diagnostic}"
+                    startup = entries[0].read_text()
+                    assert str(program.resolve()) in startup and str(foreign) not in startup, startup
+                    assert "/.mount_" not in startup, startup
+                    assert foreign.read_text() == "#!/bin/sh\nexit 42\n"
+                    report["packages"][name] = {"installedOrExtracted": True, "nativeMessaging": True, "visibleWindow": True, "aliveAfterStartup": True, "durableAutostart": True, "foreignAppImagePreserved": True}
                 finally:
                     if process.poll() is None:
                         os.killpg(process.pid, signal.SIGTERM)

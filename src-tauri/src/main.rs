@@ -1,5 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 fn main() {
+    // SAFETY: this is the first operation in main, before Tauri, async runtimes,
+    // or any helper threads can read the process environment.
+    #[cfg(target_os = "linux")]
+    unsafe { nodecloak_lib::sanitize_appimage_environment_before_startup(); }
     let args:Vec<String>=std::env::args().collect();
     if args.get(1).is_some_and(|a|a=="--nodecloak-app-proxy") {
         if args.len()!=4{eprintln!("应用代理启动参数无效");std::process::exit(1);}

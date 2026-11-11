@@ -1,4 +1,15 @@
 mod autostart;
+#[cfg(any(target_os = "linux", test))]
+mod appimage;
+/// Remove inherited AppImage identity before Tauri captures it for updating,
+/// relaunching, resource paths, and automatic startup.
+///
+/// # Safety
+/// Call only at the beginning of main, before starting any threads or runtime.
+#[cfg(target_os = "linux")]
+pub unsafe fn sanitize_appimage_environment_before_startup() {
+    unsafe { appimage::sanitize_before_startup(); }
+}
 mod app_proxy;
 pub fn run_app_proxy_helper(suffix:&str,parent:u32)->Result<(),String>{
     #[cfg(any(windows,target_os="macos"))] {tauri::async_runtime::block_on(app_proxy::helper::run(suffix,parent))}
@@ -53,8 +64,10 @@ fn supports_in_app_updates(app: tauri::AppHandle) -> bool {
     {
         // The Linux updater replaces an AppImage. deb installations are updated
         // through the downloaded package, never by installing an AppImage over it.
-        app.env().appimage.map(std::path::PathBuf::from)
-            .is_some_and(|path| path.is_absolute() && path.is_file())
+        let environment = app.env();
+        std::env::current_exe().ok().and_then(|executable| {
+            appimage::owned_image(&executable, environment.appimage.as_deref(), environment.appdir.as_deref())
+        }).is_some()
     }
     #[cfg(not(target_os = "linux"))]
     { let _ = app; true }
