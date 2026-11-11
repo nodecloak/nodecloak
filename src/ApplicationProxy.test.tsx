@@ -41,6 +41,8 @@ it('cancelled administrator authorization retains off state and an actionable er
 it('unsupported platforms never offer an enabled start control',async()=>{
  view.supported=false;await act(async()=>root.render(<ApplicationProxy/>));
  expect(host.textContent).toContain('当前系统仍可使用浏览器副本代理');expect(button('开启应用代理')!.disabled).toBe(true);
+ expect(host.textContent).not.toContain('Windows 管理员授权');
+ expect(host.textContent).not.toContain('macOS 管理员授权');
 });
 it('dismisses a persisted runtime error without changing routing state',async()=>{
  view.runtime.phase='error';view.runtime.error='启动已取消';await act(async()=>root.render(<ApplicationProxy/>));

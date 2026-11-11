@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/nodecloak/nodecloak/releases/latest"><img src="https://img.shields.io/github/v/release/nodecloak/nodecloak?style=flat-square&color=2f8f68" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/nodecloak/nodecloak?style=flat-square&color=2f8f68" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-4b5563?style=flat-square" alt="Windows and macOS">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Ubuntu-4b5563?style=flat-square" alt="Windows, macOS and Ubuntu">
 </p>
 
 <p align="center">
@@ -50,7 +50,7 @@
 | **终端启动器** | 从指定目录打开 Claude Code、Codex CLI、Gemini CLI 或普通终端，为各工具保存时区、语言和环境变量 |
 | **环境检测与修复** | 查看网络出口和浏览器环境，检查系统时间等设置，查看启动日志及修改记录 |
 
-浏览器副本和应用代理均支持 Windows 和 macOS。不同浏览器对高级设置的支持方式有所不同。
+浏览器副本支持 Windows、macOS 和 Ubuntu 24.04 及以上 x64。应用代理支持 Windows 和 macOS，Linux 暂不可用。不同浏览器对高级设置的支持方式有所不同。
 
 ## 下载
 
@@ -62,8 +62,12 @@
 | Windows x64，想直接运行 | `_windows_x64_portable.exe` | 下载后直接打开 |
 | macOS，Apple Silicon / M 系列 | `_macos_arm64.dmg` | 将应用拖入 Applications |
 | macOS，Intel | `_macos_x64.dmg` | 将应用拖入 Applications |
+| Ubuntu 24.04+ x64 | `_linux_x64.deb` | 使用 `sudo apt install ./NodeCloak_5.0.2_linux_x64.deb` 安装 |
+| Ubuntu 24.04+ x64，想直接运行 | `_linux_x64.AppImage` | 允许文件作为程序执行后打开 |
 
-已安装的用户可以在应用内检查更新。便携版通过应用内更新时会安装安装版，原便携文件保留。
+Windows、macOS 和 Linux AppImage 用户可以在应用内检查更新。Windows 便携版通过应用内更新时会安装安装版，原便携文件保留。Ubuntu deb 用户请下载新版后重新安装；已有副本和设置继续保留。
+
+Ubuntu AppImage 首次使用可运行 `chmod +x ./NodeCloak_5.0.2_linux_x64.AppImage`，再双击或从终端启动。若提示缺少 FUSE 2，可安装 `libfuse2t64`，或选择 deb 安装包。请安装可直接运行的 Chrome、Edge、Firefox 或 Chromium；Snap / Flatpak 浏览器的沙箱可能限制自定义副本目录和本地连接。
 
 ## 快速上手
 
@@ -144,7 +148,7 @@ Windows 默认使用 `%APPDATA%\com.nodecloak`，macOS 默认使用 `~/Library/A
 
 技术栈：**Tauri 2 · React · TypeScript · Rust**。
 
-需要 Node.js 24 和 Rust stable。Windows 需要 Visual Studio C++ Build Tools 和 WebView2；macOS 需要 Xcode Command Line Tools。
+需要 Node.js 24 和 Rust stable。Windows 需要 Visual Studio C++ Build Tools 和 WebView2；macOS 需要 Xcode Command Line Tools。Ubuntu 24.04 需要 WebKitGTK 4.1、GTK 3、AppIndicator、OpenSSL 和 librsvg 开发包，以及构建工具、patchelf 和 xdg-utils。
 
 ```sh
 git clone https://github.com/nodecloak/nodecloak.git

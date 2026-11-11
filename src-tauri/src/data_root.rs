@@ -9,6 +9,9 @@ pub struct DataRoot(pub PathBuf);
 fn has_environment_data(root: &Path) -> bool {
     root.join("history.json").is_file()
         || root.join("profiles.json").is_file()
+        || root.join("cloud/state.json").is_file()
+        || root.join("terminal-environments/key-id").is_file()
+        || root.join("font-backups").is_dir()
         || root.join("profiles").is_dir()
         || ["browser-chrome", "browser-edge", "browser-firefox"]
             .iter()
@@ -32,6 +35,22 @@ pub fn resolve(current: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_and_terminal_data_keep_the_current_xdg_directory() {
+        for marker in ["cloud/state.json", "terminal-environments/key-id"] {
+            let directory = tempfile::tempdir().unwrap();
+            let data_home = directory.path().join("custom data home");
+            let current = data_home.join("com.nodecloak");
+            let legacy = data_home.join("com.claudedone");
+            std::fs::create_dir_all(legacy.join("profiles")).unwrap();
+            let file = current.join(marker);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "fixture").unwrap();
+            assert_eq!(resolve(current.clone()), current);
+            assert_eq!(std::fs::read_to_string(file).unwrap(), "fixture");
+        }
+    }
+
     #[test]
     fn nodecloak_reuses_claudedone_before_older_legacy_data() {
         let directory = tempfile::tempdir().unwrap();

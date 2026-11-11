@@ -21,7 +21,7 @@ export async function checkForUpdates(): Promise<UpdateCheck> {
   await new Promise(resolve => setTimeout(resolve, 700));
   const preview = import.meta.env.DEV ? new URLSearchParams(location.search).get('updatePreview') : null;
   if (preview === 'offline') throw new Error('演示：连接官网失败，请检查网络后重试。');
-  return { currentVersion: version, latestVersion: preview === 'available' ? '0.6.0' : version, available: preview === 'available', supported: preview !== 'unsupported', notes: ['优化环境诊断体验（演示）', '改进浏览器配置兼容性（演示）'], publishedAt: new Date().toISOString(), checkedAt: new Date().toISOString() };
+  return { currentVersion: version, latestVersion: preview === 'available' ? '0.6.0' : version, available: preview === 'available', supported: !['unsupported','manual'].includes(preview ?? ''), manualDownload: preview === 'manual', notes: ['优化环境诊断体验（演示）', '改进浏览器配置兼容性（演示）'], publishedAt: new Date().toISOString(), checkedAt: new Date().toISOString() };
 }
 export async function installAvailableUpdate(onProgress:(progress:UpdateProgress)=>void):Promise<void> {
   if(native) return installNativeUpdate(onProgress);
@@ -40,7 +40,7 @@ export async function restartAfterUpdate():Promise<void> {
 }
 export async function openDownloadPage(): Promise<void> {
   if (native) return invoke('open_download_page');
-  window.open('https://claudedone.com/#download', '_blank', 'noopener,noreferrer');
+  window.open('https://nodecloak.com/#download', '_blank', 'noopener,noreferrer');
 }
 export async function openFirefoxDownload(): Promise<void> {
   if (native) return invoke('open_firefox_download');

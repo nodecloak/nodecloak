@@ -303,6 +303,8 @@ pub fn scan_local(root: &Path, browser: &str) -> Result<Scan, String> {
             "Windows"
         } else if cfg!(target_os = "macos") {
             "macOS"
+        } else if cfg!(target_os = "linux") {
+            "Linux"
         } else {
             "Unsupported"
         }

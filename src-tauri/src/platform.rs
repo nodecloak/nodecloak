@@ -2,12 +2,16 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+#[cfg(any(target_os = "linux", test))]
+mod desktop_linux;
 #[cfg(windows)]
 mod endpoint;
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(any(test, target_os = "macos", target_os = "linux"))]
 mod singleton;
-#[cfg(any(test,target_os="macos"))]
+#[cfg(any(test,target_os="macos", target_os = "linux"))]
 mod quit;
+#[cfg(target_os = "linux")]
+mod linux;
 
 pub fn command(program: &str) -> Command {
     let mut cmd = Command::new(program);
@@ -73,6 +77,10 @@ fn elevate_timezone(zone: &str) -> Result<(), String> {
 }
 
 pub fn browser_path(browser: &str) -> Result<PathBuf, String> {
+    #[cfg(target_os = "linux")]
+    return linux::browser_path(browser);
+    #[cfg(not(target_os = "linux"))]
+    {
     let suffix = match browser {
         "chrome" => "Google/Chrome/Application/chrome.exe",
         "edge" => "Microsoft/Edge/Application/msedge.exe",
@@ -109,6 +117,7 @@ pub fn browser_path(browser: &str) -> Result<PathBuf, String> {
     }
     let _ = suffix;
     Err("没有找到此浏览器，请先安装所选的 Chrome、Microsoft Edge 或 Firefox。".into())
+    }
 }
 
 pub fn home_dir() -> PathBuf {
@@ -134,7 +143,11 @@ pub fn timezone() -> Result<String, String> {
             std::time::Duration::from_millis(50),
         )
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        desktop_linux::timezone()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         Err("当前系统不在支持范围内".into())
     }
@@ -189,10 +202,13 @@ pub fn timezone_catalog() -> Result<Vec<TimezoneOption>, String> {
     #[cfg(target_os = "windows")]
     let text = output("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command",
         "[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); @(Get-TimeZone -ListAvailable | ForEach-Object { @{ id=$_.Id; label=$_.DisplayName; offsetMinutes=[int](-$_.GetUtcOffset([datetime]::UtcNow).TotalMinutes) } }) | ConvertTo-Json -Compress"])?;
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     let text = "[]".to_string();
+    #[cfg(not(target_os = "linux"))]
     let mut options: Vec<TimezoneOption> =
         serde_json::from_str(&text).map_err(|_| "无法解析系统支持的时区清单".to_string())?;
+    #[cfg(target_os = "linux")]
+    let mut options = desktop_linux::timezone_catalog();
     options.retain(|option| valid_timezone_name(&option.id));
     options.sort_by(|a, b| a.id.cmp(&b.id));
     if options.is_empty() {
@@ -270,9 +286,12 @@ pub fn offset_minutes() -> Result<i32, String> {
         text.parse::<i32>()
             .map_err(|_| "无法读取系统 UTC 偏移".into())
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        let text = output("/bin/date", &["+%z"])?;
+        let result = command("/bin/date").arg("+%z").env_remove("TZ").output().map_err(|_| "无法读取系统 UTC 偏移")?;
+        if !result.status.success() { return Err("无法读取系统 UTC 偏移".into()); }
+        let text = String::from_utf8_lossy(&result.stdout);
+        let text = text.trim();
         let bytes = text.as_bytes();
         if bytes.len() != 5
             || !matches!(bytes[0], b'+' | b'-')
@@ -284,7 +303,7 @@ pub fn offset_minutes() -> Result<i32, String> {
         let minutes = text[3..5].parse::<i32>().map_err(|e| e.to_string())?;
         Ok((hours * 60 + minutes) * if bytes[0] == b'+' { -1 } else { 1 })
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         Err("不支持当前系统".into())
     }
@@ -320,6 +339,13 @@ pub fn set_timezone(zone: &str) -> Result<(), String> {
         let shell = format!("/usr/sbin/systemsetup -settimezone '{zone}'");
         let script = format!("do shell script \"{shell}\" with administrator privileges");
         output("/usr/bin/osascript", &["-e", &script])?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // systemd requests authorization through the desktop's PolicyKit agent.
+        // The main application and browsers remain ordinary user processes.
+        custom_timezone_from_catalog(zone, &timezone_catalog()?)?;
+        output("/usr/bin/timedatectl", &["set-timezone", zone])?;
     }
     if !timezone_names_match(&timezone()?, zone) {
         return Err(
@@ -421,6 +447,9 @@ pub fn ensure_profile_closed(profile: &Path) -> Result<(), String> {
     let processes = output("/bin/ps", &["-ax", "-o", "command="])?;
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let processes = String::new();
+    #[cfg(target_os = "linux")]
+    let running = !profile_process_ids(profile)?.is_empty();
+    #[cfg(not(target_os = "linux"))]
     let running = if cfg!(target_os = "windows") {
         processes
             .lines()
@@ -446,10 +475,12 @@ pub fn ensure_profile_closed(profile: &Path) -> Result<(), String> {
             ));
         }
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     singleton::check(profile)?;
-    // Preserve existing non-Mac behavior. Existence alone is not macOS lock ownership.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    linux::check_firefox_lock(profile)?;
+    // Unix lock files can survive normal shutdown. Check ownership, not existence.
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     if profile.join("SingletonLock").symlink_metadata().is_ok() {
         return Err(
             "专用浏览器仍被锁定。请关闭窗口；若已退出，请重启浏览器后正常退出再重试。".into(),
@@ -479,7 +510,13 @@ pub fn open_timezone_settings() -> Result<(), String> {
         }
         return Ok(());
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        command("gnome-control-center").arg("datetime").spawn()
+            .map_err(|_| "请在 Ubuntu 系统设置中打开日期与时间。")?;
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     Err("请在系统设置中打开日期与时间。".into())
 }
 
@@ -871,6 +908,22 @@ fn spawn_browser_impl(
 ) -> Result<(), String> {
     let exe = browser_path(browser)?;
     let mut cmd = command(exe.to_str().ok_or("浏览器路径格式无效")?);
+    #[cfg(target_os = "linux")]
+    {
+        // XWayland is available in Ubuntu's Wayland session. Its native window
+        // protocols let us focus/close just this profile and honor save prompts.
+        if browser == "firefox" {
+            cmd.env("MOZ_ENABLE_WAYLAND", "0").env("GDK_BACKEND", "x11");
+        } else {
+            cmd.arg("--ozone-platform=x11");
+        }
+        // AppImage runtime libraries belong to NodeCloak, not external browsers.
+        if std::env::var_os("APPIMAGE").is_some() {
+            for key in ["LD_LIBRARY_PATH", "LD_PRELOAD", "APPIMAGE", "APPDIR", "ARGV0", "OWD"] {
+                cmd.env_remove(key);
+            }
+        }
+    }
     // Installed-browser integration fixtures opt into the browser's real
     // headless mode on desktops that suspend background geolocation.
     #[cfg(test)]
@@ -1143,9 +1196,18 @@ pub fn focus_profile(profile: &Path) -> Result<(), String> {
     {
         output("/usr/bin/osascript",&["-e",&format!("tell application \"System Events\" to set frontmost of first process whose unix id is {} to true",ids[0])])?;
     }
+    #[cfg(target_os = "linux")]
+    linux::focus(&ids)?;
     Ok(())
 }
 pub fn close_profile(profile: &Path) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        return quit::wait(std::time::Duration::from_secs(8),
+            || profile_process_ids(profile),
+            |pid| linux::request_close(pid),
+            || ensure_profile_closed(profile));
+    }
     #[cfg(windows)]
     {
         let ids = profile_process_ids(profile)?;
@@ -1188,7 +1250,7 @@ pub fn close_profile(profile: &Path) -> Result<(), String> {
     }
     return closed;
     }
-    #[cfg(not(target_os="macos"))]
+    #[cfg(not(any(target_os="macos", target_os="linux")))]
     wait_profile_closed(profile, std::time::Duration::from_secs(8))
 }
 
@@ -1287,12 +1349,14 @@ pub fn cli_installed() -> bool {
     ]);
     roots
         .into_iter()
-        .any(|p| names.iter().any(|n| p.join(n).is_file()))
+        .any(|p| names.iter().any(|n| crate::terminal::executable_file(&p.join(n))))
 }
 
 pub fn launcher_name() -> &'static str {
     if cfg!(target_os = "windows") {
         "claude-ready.ps1"
+    } else if cfg!(target_os = "linux") {
+        "claude-ready.sh"
     } else {
         "claude-ready.command"
     }
@@ -1301,6 +1365,8 @@ pub fn launcher_name() -> &'static str {
 pub fn launcher_contents() -> &'static str {
     if cfg!(target_os = "windows") {
         "$ErrorActionPreference = 'Stop'\r\n$env:TZ = 'Asia/Singapore'\r\n$env:LANG = 'en_US.UTF-8'\r\n$env:LC_ALL = 'en_US.UTF-8'\r\n$env:PATH = (Join-Path $env:USERPROFILE '.local/bin') + ';' + $env:PATH\r\nSet-Location -LiteralPath $env:USERPROFILE\r\nif (-not (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue)) { throw 'Claude Code is not installed or not on PATH.' }\r\n& claude @args\r\n"
+    } else if cfg!(target_os = "linux") {
+        "#!/bin/bash\nexport PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:/usr/local/bin:/usr/bin:/bin:$PATH\"\nexport TZ=Asia/Singapore\nexport LANG=en_US.UTF-8\nexport LC_ALL=en_US.UTF-8\ncd -- \"$HOME\" || exit 1\nif ! command -v claude >/dev/null 2>&1; then echo 'Claude Code is not installed or not on PATH.'; exit 1; fi\nexec claude \"$@\"\n"
     } else {
         "#!/bin/zsh\nexport PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"\nexport TZ=Asia/Singapore\nexport LANG=en_US.UTF-8\nexport LC_ALL=en_US.UTF-8\ncd \"$HOME\" || exit 1\nif ! command -v claude >/dev/null 2>&1; then echo 'Claude Code is not installed or not on PATH.'; exit 1; fi\nexec claude \"$@\"\n"
     }
@@ -1337,11 +1403,17 @@ pub fn launch_cli(path: &Path) -> Result<(), String> {
             ],
         )?;
     }
+    #[cfg(target_os = "linux")]
+    crate::terminal::linux::open(path, &home_dir(), None)?;
     let _ = path;
     Ok(())
 }
 
 pub fn font_evidence() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    return desktop_linux::font_evidence();
+    #[cfg(not(target_os = "linux"))]
+    {
     let root = if cfg!(target_os = "windows") {
         std::env::var_os("WINDIR")
             .map(PathBuf::from)
@@ -1364,4 +1436,5 @@ pub fn font_evidence() -> Vec<String> {
     .filter(|name| root.join(name).is_file())
     .map(|s| s.to_string())
     .collect()
+    }
 }

@@ -789,7 +789,7 @@
   "终端使用新加坡时区与英文 locale。设置仅作用于这个终端及其启动的进程。": "The terminal uses the Singapore timezone and an English locale. These settings apply only to this terminal and the processes it launches.",
   "沿用已有连接": "Keep existing connectivity",
   "继承电脑当前的代理、网关与 CLI 配置。浏览器副本的独立代理不会自动应用到终端。": "Inherits the computer's current proxies, gateway and CLI configuration. A browser profile's separate proxy is not automatically applied to the terminal.",
-  "Windows 使用 PowerShell，macOS 使用 Terminal。工具的安装、登录和权限由各 CLI 自身管理。": "Windows uses PowerShell; macOS uses Terminal. Each CLI manages its own installation, sign-in and permissions.",
+  "Windows 使用 PowerShell，macOS 使用 Terminal，Ubuntu 使用已安装的桌面终端和 Bash。工具的安装、登录和权限由各 CLI 自身管理。": "Windows uses PowerShell, macOS uses Terminal, and Ubuntu uses an installed desktop terminal with Bash. Each CLI manages its own installation, sign-in and permissions.",
   "当前为界面演示，安装状态是示例数据。": "This is a UI demo. Installation statuses are example data.",
   "外观主题": "Appearance",
   "浅色主题": "Light theme",
@@ -1739,5 +1739,8 @@
   "应用代理已停止，已释放本次会话的网络接口和路由": "Application proxy stopped. The session’s network interface and routes have been released.",
   "启用前置代理": "Enable first-hop proxy",
   "关闭时直接连接指定节点，保留前置代理地址和协议。": "When off, connect to the selected node directly. The first-hop address and protocol are kept.",
-  "请先填写前置代理地址": "Enter a first-hop proxy address first"
+  "请先填写前置代理地址": "Enter a first-hop proxy address first",
+  "当前安装方式使用手动更新": "This installation uses manual updates",
+  "当前安装方式请从官网下载并安装新版。副本和设置会保留。": "Download and install the latest version from the official website. Your profiles and settings will be preserved.",
+  "打开官网下载页": "Open official downloads"
 }

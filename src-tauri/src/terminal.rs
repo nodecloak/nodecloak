@@ -1,4 +1,6 @@
 pub mod environment;
+#[cfg(any(target_os = "linux", test))]
+pub(crate) mod linux;
 use crate::{engine, platform};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -79,6 +81,17 @@ fn search_roots() -> Vec<PathBuf> {
     roots
 }
 
+pub(crate) fn executable_file(file: &Path) -> bool {
+    if !file.is_file() { return false; }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return file.metadata().is_ok_and(|m| m.permissions().mode() & 0o111 != 0);
+    }
+    #[cfg(not(unix))]
+    true
+}
+
 fn find_in(tool: Tool, roots: &[PathBuf], windows: bool) -> Option<PathBuf> {
     let command = tool.command()?;
     let names = if windows {
@@ -90,7 +103,7 @@ fn find_in(tool: Tool, roots: &[PathBuf], windows: bool) -> Option<PathBuf> {
         names
             .iter()
             .map(|name| root.join(name))
-            .find(|file| file.is_file())
+            .find(|file| if windows { file.is_file() } else { executable_file(file) })
     })
 }
 
@@ -155,7 +168,7 @@ fn working_directory(input: &str) -> Result<PathBuf, String> {
     };
     if !path.is_absolute() || !path.is_dir() {
         return Err(
-            "请选择已存在的绝对工作目录，例如 D:\\Projects 或 /Users/name/Projects。".into(),
+            "请选择已存在的绝对工作目录，例如 D:\\Projects、/Users/name/Projects 或 /home/name/Projects。".into(),
         );
     }
     Ok(path)
@@ -205,9 +218,12 @@ pub fn launch(
     let path = folder.join(format!(
         "{}.{}",
         tool.slug(),
-        if cfg!(windows) { "ps1" } else { "command" }
+        if cfg!(windows) { "ps1" } else if cfg!(target_os = "linux") { "sh" } else { "command" }
     ));
+    #[cfg(not(target_os = "linux"))]
     let contents = launcher_contents(tool, cfg!(windows));
+    #[cfg(target_os = "linux")]
+    let contents = linux::launcher_contents(tool);
     crate::profiles::guard_tree(&path)?;
     if path.exists() {
         let previous = fs::read_to_string(&path).map_err(|e| e.to_string())?;
@@ -282,9 +298,11 @@ pub fn launch(
             return Err("无法打开 Terminal，请检查 macOS 自动化权限。".into());
         }
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    linux::launch(&folder, &path, &directory, &overrides)?;
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
-        return Err("目前终端启动支持 Windows 和 macOS。".into());
+        return Err("目前终端启动支持 Windows、macOS 和 Ubuntu。".into());
     }
     #[allow(unreachable_code)]
     Ok(())

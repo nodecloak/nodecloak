@@ -1,6 +1,6 @@
 fn main() {
     let platform=match (std::env::var("CARGO_CFG_TARGET_OS").unwrap().as_str(),std::env::var("CARGO_CFG_TARGET_ARCH").unwrap().as_str()) {
-        ("windows","x86_64")=>"win32-x64",("macos","x86_64")=>"darwin-x64",("macos","aarch64")=>"darwin-arm64",
+        ("windows","x86_64")=>"win32-x64",("macos","x86_64")=>"darwin-x64",("macos","aarch64")=>"darwin-arm64",("linux","x86_64")=>"linux-x64",
         _=>panic!("Prepare a supported sing-box desktop target before building"),
     };
     let source=std::path::PathBuf::from("../.tools/singbox").join(platform);

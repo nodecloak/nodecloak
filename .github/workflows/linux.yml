@@ -1,0 +1,69 @@
+name: Ubuntu desktop checks and packages
+on:
+  push:
+    branches: ['codex/ubuntu-502']
+  workflow_call:
+    inputs:
+      sign_updates:
+        type: boolean
+        default: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+permissions:
+  contents: read
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+      - name: Install desktop dependencies and test browsers
+        run: bash scripts/prepare-linux-ci.sh
+      - run: npm ci
+      - run: node scripts/prepare-singbox.mjs
+      - run: node scripts/check-release-version.mjs
+      - run: node --test scripts/release-checks.mjs scripts/apple-ticket-checks.mjs
+      - run: npm test -- --maxWorkers=2
+      - run: npm run test:session-codec && npm run test:firefox-extension
+      - run: npm run build
+      - name: Rust tests and native Ubuntu checks
+        run: dbus-run-session -- xvfb-run -a bash scripts/check-linux-runtime.sh
+      - name: Build deb and AppImage
+        run: node scripts/build-desktop.mjs
+        env:
+          RELEASE_TAG: ${{ inputs.sign_updates && github.ref_name || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.sign_updates && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+      - name: Install and launch final packages
+        run: dbus-run-session -- xvfb-run -a python3 scripts/check-linux-packages.py
+      - run: node scripts/collect-release-assets.mjs linux-x64
+        env:
+          RELEASE_TAG: ${{ inputs.sign_updates && github.ref_name || '' }}
+      - run: node scripts/collect-release-notices.mjs linux-x64 x86_64-unknown-linux-gnu
+      - name: Record build source
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          fs.writeFileSync('build-provenance.json', JSON.stringify({source:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),workflowSource:process.env.GITHUB_SHA,run:process.env.GITHUB_RUN_ID,version:JSON.parse(fs.readFileSync('package.json','utf8')).version},null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nodecloak-linux-x64
+          path: |
+            release-assets/*
+            release-notices/**
+            build-provenance.json
+            linux-package-verification.json
+          if-no-files-found: error

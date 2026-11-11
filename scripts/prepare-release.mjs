@@ -1,16 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {projectRoot,releaseVersion,verifyReleaseAssets} from './release-utils.mjs';
+import {projectRoot,releaseVersion,verifyReleaseAssets,updaterPackages} from './release-utils.mjs';
 if(!process.env.RELEASE_TAG) throw new Error('A version tag is required to publish');
 const version=releaseVersion();
 const directory=path.join(projectRoot,'release-assets');
 const files=verifyReleaseAssets(directory,version);
-const names={
-  'windows-x86_64':`NodeCloak_${version}_windows_x64_setup.exe`,
-  'darwin-aarch64':`NodeCloak_${version}_macos_arm64_update.app.tar.gz`,
-  'darwin-x86_64':`NodeCloak_${version}_macos_x64_update.app.tar.gz`,
-};
+const names=updaterPackages(version);
 const platforms={};
 for(const [platform,name] of Object.entries(names)) {
   const signature=fs.readFileSync(path.join(directory,`${name}.sig`),'utf8').trim();
@@ -20,12 +16,13 @@ for(const [platform,name] of Object.entries(names)) {
 }
 // User-facing notices only: no admin features, server internals or build/deployment details.
 const releaseNotes=[
-  "重新发布 Windows 和 macOS 安装包。已有副本、代理配置和修复记录可继续使用。 / Rebuilt the Windows and macOS packages. Existing profiles, proxy settings, and repair history are preserved."
+  "新增 Ubuntu 24.04 及以上 x64 桌面版，提供 deb 和 AppImage，可使用独立浏览器副本、节点代理与 MCP。 / Adds an Ubuntu 24.04+ x64 desktop app in deb and AppImage formats, with independent browser profiles, proxy nodes and MCP.",
+  "Linux 应用代理暂不可用。AppImage 支持应用内更新；deb 用户请下载安装新版。已有副本、代理配置和修复记录继续保留。 / Application Proxy is not yet available on Linux. AppImage supports in-app updates; deb users can download and install newer versions. Existing profiles, proxy settings and repair history are preserved."
 ];
 const manifest={version,notes:releaseNotes.map(note=>`- ${note}`).join('\n'),pub_date:new Date().toISOString(),platforms};
 fs.writeFileSync(path.join(directory,'latest.json'),JSON.stringify(manifest,null,2)+'\n');
 files.push('latest.json');
 const sums=files.map(name=>`${crypto.createHash('sha256').update(fs.readFileSync(path.join(directory,name))).digest('hex')}  ${name}`).join('\n')+'\n';
 fs.writeFileSync(path.join(directory,'SHA256SUMS.txt'),sums);
-fs.writeFileSync(path.join(projectRoot,'.release-notes.md'),`NodeCloak ${version}\n\n${manifest.notes}\n\n已有浏览器副本和修复记录继续保留。0.5.9 及后续版本可在应用内检查更新。\n\n提供 Windows x64 安装版和便携版，以及 macOS Apple Silicon 和 Intel 安装包。\n`);
+fs.writeFileSync(path.join(projectRoot,'.release-notes.md'),`NodeCloak ${version}\n\n${manifest.notes}\n\n提供 Windows x64 安装版和便携版、macOS Apple Silicon 和 Intel 安装包，以及 Ubuntu x64 deb 和 AppImage。 / Downloads are available for Windows x64 (installer and portable), macOS (Apple Silicon and Intel), and Ubuntu x64 (deb and AppImage).\n`);
 console.log(`Verified complete release ${version}; checksums and release notes written.`);

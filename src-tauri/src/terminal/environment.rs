@@ -278,7 +278,7 @@ pub fn save(root: &Path, tool: Tool, environment: &Environment) -> Result<(), St
     crate::engine::atomic_write(&file, &encrypted)
         .map_err(|_| "无法保存终端环境，请检查配置目录。".into())
 }
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 pub(super) fn mac_exports(values: &BTreeMap<String, String>) -> String {
     values
         .iter()
@@ -288,6 +288,26 @@ pub(super) fn mac_exports(values: &BTreeMap<String, String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "Requires an unlocked Secret Service in an isolated D-Bus session"]
+    fn native_linux_credential_roundtrip() {
+        let service = format!("com.nodecloak.test.{}", uuid::Uuid::new_v4());
+        let account = format!("fixture-{}", uuid::Uuid::new_v4());
+        struct Cleanup(keyring::Entry);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = self.0.delete_credential(); }
+        }
+        let cleanup = Cleanup(keyring::Entry::new(&service, &account).unwrap());
+        assert!(matches!(cleanup.0.get_password(), Err(keyring::Error::NoEntry)));
+        cleanup.0.set_password("synthetic-linux-credential").unwrap();
+        // Reconstruct the entry to verify the real persistent backend, rather
+        // than an in-memory entry or a mock selected on unsupported platforms.
+        let reopened = keyring::Entry::new(&service, &account).unwrap();
+        assert_eq!(reopened.get_password().unwrap(), "synthetic-linux-credential");
+        reopened.delete_credential().unwrap();
+        assert!(matches!(cleanup.0.get_password(), Err(keyring::Error::NoEntry)));
+    }
     #[test]
     #[ignore = "Uses a unique synthetic OS credential and removes it afterwards"]
     fn native_terminal_environment_credentials_round_trip() {

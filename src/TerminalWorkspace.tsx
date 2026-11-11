@@ -70,6 +70,6 @@ export default function TerminalWorkspace({busy,onBusyChange,onNotify}:{busy:boo
     </section>
     <div className="terminal-card" aria-label={t('启动环境预览')}><div className="terminal-top"><span className="terminal-dots"><i/><i/><i/></span><span>{t('NodeCloak 启动环境')}</span><span>{t('只影响当前进程')}</span></div><div className="terminal-body"><p><span className="terminal-comment">{t('# 从所选工作目录启动')}</span></p>{!preview.length&&<p><span className="terminal-comment">{t('# 继承已有环境')}</span></p>}{preview.map(([name,value],i)=><p key={`${name}-${i}`}><span>{name}</span><span className="terminal-equals">=</span>{value}</p>)}<p className="terminal-command"><span>❯</span> {t(tool.command||'你的 CLI 命令')}<span className="terminal-caret"/></p></div></div>
     <div className="info-grid"><article className="info-card"><Clock3 size={20}/><h3>{t('独立的进程环境')}</h3><p>{t('自定义时区、语言和环境变量，仅作用于这个终端及其启动的进程。')}</p></article><article className="info-card"><Wifi size={20}/><h3>{t('沿用已有连接')}</h3><p>{t('继承已有代理与 CLI 配置，自定义变量可覆盖对应值。')}</p></article></div>
-    <div className="notice"><Info size={17}/><p>{t('Windows 使用 PowerShell，macOS 使用 Terminal。工具的安装、登录和权限由各 CLI 自身管理。')}{t(!native&&'当前为界面演示，安装状态是示例数据。')}</p></div>
+    <div className="notice"><Info size={17}/><p>{t('Windows 使用 PowerShell，macOS 使用 Terminal，Ubuntu 使用已安装的桌面终端和 Bash。工具的安装、登录和权限由各 CLI 自身管理。')}{t(!native&&'当前为界面演示，安装状态是示例数据。')}</p></div>
   </div>;
 }

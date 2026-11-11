@@ -26,6 +26,8 @@ pub fn run_proxy_core_stdio()->Result<(),String>{proxy::core::run_stdio()}
 mod regional;
 mod session_restore;
 mod terminal;
+#[cfg(any(target_os = "linux", test))]
+mod system_languages;
 pub mod mcp;
 #[cfg(windows)]
 mod windows_icons;
@@ -43,6 +45,19 @@ fn is_portable_build() -> Result<bool, String> {
     {
         Ok(false)
     }
+}
+
+#[tauri::command]
+fn supports_in_app_updates() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // The Linux updater replaces an AppImage. deb installations are updated
+        // through the downloaded package, never by installing an AppImage over it.
+        std::env::var_os("APPIMAGE").map(std::path::PathBuf::from)
+            .is_some_and(|path| path.is_absolute() && path.is_file())
+    }
+    #[cfg(not(target_os = "linux"))]
+    true
 }
 
 #[tauri::command]
@@ -374,6 +389,10 @@ fn open_terminal_guide(tool: terminal::Tool) -> Result<(), String> {
 #[tauri::command]
 async fn get_system_languages() -> Vec<String> {
     tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(target_os = "linux")]
+        { system_languages::linux() }
+        #[cfg(not(target_os = "linux"))]
+        {
         #[cfg(windows)]
         let output = platform::command("powershell.exe")
             .args([
@@ -408,6 +427,7 @@ async fn get_system_languages() -> Vec<String> {
                     .collect()
             })
             .unwrap_or_default()
+        }
     })
     .await
     .unwrap_or_default()
@@ -581,6 +601,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            supports_in_app_updates,
             app_proxy::commands::application_proxy_action,
             autostart::get_autostart_enabled,
             autostart::set_autostart_enabled,

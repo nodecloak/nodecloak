@@ -17,7 +17,7 @@ fn finish_probe(file: std::fs::File, result: Result<(), String>) -> Result<(), S
 fn idle_regular_file(path: &Path) -> Result<(), String> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true);
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
@@ -41,7 +41,7 @@ fn idle_regular_file(path: &Path) -> Result<(), String> {
         if !current.is_file() || current.file_type().is_symlink() {
             return Err("浏览器副本锁在检查期间发生变化，请重试".into());
         }
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             use std::os::unix::fs::MetadataExt;
             if opened.dev() != current.dev() || opened.ino() != current.ino() {
@@ -80,7 +80,7 @@ fn stale_link(
     }
     Ok(())
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn hostname() -> Result<String, String> {
     let mut bytes = [0u8; 256];
     if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len()) } != 0 {
@@ -96,7 +96,7 @@ fn hostname() -> Result<String, String> {
         .map(str::to_owned)
         .ok_or("无法确认副本锁的主机信息".into())
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn process_alive(pid: i32) -> Result<bool, String> {
     if unsafe { libc::kill(pid, 0) } == 0 {
         return Ok(true);
@@ -116,7 +116,7 @@ pub(super) fn check(profile: &Path) -> Result<(), String> {
         Err(e) => return Err(failure(e)),
     };
     let result = if metadata.file_type().is_symlink() {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let verify = || -> Result<(), String> {
                 use std::os::unix::fs::MetadataExt;
@@ -134,7 +134,7 @@ pub(super) fn check(profile: &Path) -> Result<(), String> {
             };
             verify()
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
             Err("此平台不支持检查浏览器链接锁".into())
         }
@@ -143,7 +143,7 @@ pub(super) fn check(profile: &Path) -> Result<(), String> {
     } else {
         Err("浏览器副本锁类型异常；原文件已保留".into())
     };
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let browser = profile
             .file_name()
@@ -171,14 +171,14 @@ pub(super) fn check(profile: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     struct Site {
         url: String,
         reports: std::sync::mpsc::Receiver<bool>,
         stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
         worker: Option<std::thread::JoinHandle<()>>,
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     impl Site {
         fn new() -> Self {
             use std::io::{Read, Write};
@@ -243,7 +243,7 @@ mod tests {
             }
         }
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     impl Drop for Site {
         fn drop(&mut self) {
             self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -287,7 +287,7 @@ mod tests {
         assert!(result.is_ok(), "after releasing owner: {result:?}");
         assert_eq!(std::fs::read(&path).unwrap(), b"keep");
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn explicit_probe_release_frees_shared_description_on_success_and_error() {
         let root = tempfile::tempdir().unwrap();
@@ -352,9 +352,9 @@ mod tests {
         std::fs::create_dir(root.path().join("SingletonLock")).unwrap();
         assert!(check(root.path()).is_err());
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
-    fn macos_stale_symlink_preserved_and_live_pid_blocks() {
+    fn unix_stale_symlink_preserved_and_live_pid_blocks() {
         let root = tempfile::tempdir().unwrap();
         let root = root.path().canonicalize().unwrap();
         let path = root.join("SingletonLock");
@@ -425,6 +425,50 @@ mod tests {
                 assert_eq!(std::fs::read(&marker).unwrap(), b"keep-login-data-fixture");
                 println!("macOS {browser} close/reopen cycle {cycle}: live protection and idle lock verified");
             }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "Starts installed Chrome, Edge and Firefox with X11/XWayland in disposable profiles"]
+    fn native_linux_browsers_close_reopen_and_preserve_other_profiles() {
+        use crate::platform;
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = platform::force_close_profile(&self.0); }
+        }
+        for browser in ["chrome", "edge", "firefox"] {
+            let root = tempfile::tempdir().unwrap();
+            let root = root.path().canonicalize().unwrap();
+            let profile = root.join(format!("browser-{browser}"));
+            let other = root.join(format!("browser-{browser}-other"));
+            std::fs::create_dir_all(&profile).unwrap();
+            std::fs::create_dir_all(&other).unwrap();
+            let _cleanup = Cleanup(profile.clone());
+            let _other_cleanup = Cleanup(other.clone());
+            let site = Site::new();
+            let other_site = Site::new();
+            let marker = profile.join("existing-profile-data");
+            std::fs::write(&marker, b"preserve").unwrap();
+            platform::spawn_browser_with_proxy(browser, &other, &other_site.url, "direct", None).unwrap();
+            assert!(!other_site.reports.recv_timeout(std::time::Duration::from_secs(25)).unwrap());
+            let other_pids = platform::profile_process_ids(&other).unwrap();
+            assert!(!other_pids.is_empty());
+            for cycle in 0..3 {
+                platform::ensure_profile_closed(&profile).unwrap();
+                platform::spawn_browser_with_proxy(browser, &profile, &site.url, "direct", None).unwrap();
+                assert_eq!(site.reports.recv_timeout(std::time::Duration::from_secs(25)).unwrap(), cycle > 0,
+                    "{browser} cookie did not survive normal shutdown cycle {cycle}");
+                assert!(platform::ensure_profile_closed(&profile).is_err());
+                platform::focus_profile(&profile).unwrap();
+                platform::close_profile(&profile).unwrap();
+                platform::ensure_profile_closed(&profile).unwrap();
+                assert_eq!(std::fs::read(&marker).unwrap(), b"preserve");
+                assert_eq!(platform::profile_process_ids(&other).unwrap(), other_pids,
+                    "closing {browser} profile affected a different profile");
+                assert!(platform::ensure_profile_closed(&other).is_err());
+                println!("Linux {browser} close/reopen cycle {cycle}: cookie retained, other profile untouched");
+            }
+            platform::close_profile(&other).unwrap();
         }
     }
 }

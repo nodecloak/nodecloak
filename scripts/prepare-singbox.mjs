@@ -10,6 +10,7 @@ export const platforms={
  'win32-x64':['windows-amd64','zip','99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df'],
  'darwin-x64':['darwin-amd64-legacy-macos-10.13','tar.gz','4591d9641e4cfda5de331414e8447aac56d10e43e01e413ef1cb8cf0e711a460'],
  'darwin-arm64':['darwin-arm64','tar.gz','0d8c7f5ed5d587b0f1a5e9772a708ec3bfa4ac4c9329604b01d8d9c2ba406838'],
+ 'linux-x64':['linux-amd64','tar.gz','699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968'],
 };
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 export async function prepare(platform=`${process.platform}-${process.arch}`) {

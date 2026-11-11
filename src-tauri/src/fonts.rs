@@ -53,10 +53,19 @@ fn user_font_dir() -> Result<PathBuf, String> {
     {
         return Ok(crate::platform::home_dir().join("Library/Fonts"));
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "linux")]
+    {
+        return Ok(linux_user_font_dir(&crate::platform::home_dir(), std::env::var_os("XDG_DATA_HOME").as_deref()));
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     Err("当前系统不支持字体管理".into())
 }
-fn candidate(name: &str) -> bool {
+#[cfg(any(target_os = "linux", test))]
+fn linux_user_font_dir(home: &Path, data_home: Option<&std::ffi::OsStr>) -> PathBuf {
+    data_home.map(Path::new).filter(|path| path.is_absolute())
+        .map(Path::to_path_buf).unwrap_or_else(|| home.join(".local/share")).join("fonts")
+}
+pub(crate) fn candidate(name: &str) -> bool {
     let compact = |value: &str| {
         value
             .to_lowercase()
@@ -425,12 +434,30 @@ pub fn apply(root: &Path, token: &str, s: &Snapshot, undo: bool) -> Result<(), S
             return Err("字体文件移除后核验失败".into());
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        let result = crate::platform::command("/usr/bin/fc-cache").arg("--force").arg(&dir)
+            .output().map_err(|_| "字体文件已更新，但无法刷新字体缓存，请安装 fontconfig 后重试。")?;
+        if !result.status.success() {
+            return Err("字体文件已更新，但字体缓存刷新失败，请退出浏览器后重试。".into());
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn linux_fonts_use_absolute_xdg_data_home_and_never_relative_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let custom = dir.path().join("custom data");
+        assert_eq!(linux_user_font_dir(&home, Some(custom.as_os_str())), custom.join("fonts"));
+        for value in [None, Some(std::ffi::OsStr::new("")), Some(std::ffi::OsStr::new("relative/fonts"))] {
+            assert_eq!(linux_user_font_dir(&home, value), home.join(".local/share/fonts"));
+        }
+    }
     #[test]
     fn recognizes_common_cjk_file_names_as_well_as_family_names() {
         assert!(candidate("NotoSansCJKsc-Regular.otf"));

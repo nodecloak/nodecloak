@@ -1,12 +1,29 @@
 import {beforeEach,describe,it,expect,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({check:vi.fn(),relaunch:vi.fn()}));
+const mocks=vi.hoisted(()=>({check:vi.fn(),relaunch:vi.fn(),invoke:vi.fn()}));
+vi.mock('@tauri-apps/api/core',()=>({invoke:mocks.invoke}));
 vi.mock('@tauri-apps/plugin-updater',()=>({check:mocks.check}));
 vi.mock('@tauri-apps/plugin-process',()=>({relaunch:mocks.relaunch}));
-beforeEach(()=>{vi.resetModules();vi.clearAllMocks();});
+beforeEach(()=>{vi.resetModules();vi.clearAllMocks();mocks.invoke.mockResolvedValue(true);});
 function update() {
   return {version:'0.5.10',body:'- 支持自动更新',date:'2026-10-07T00:00:00Z',close:vi.fn().mockResolvedValue(undefined),download:vi.fn().mockResolvedValue(undefined),install:vi.fn().mockResolvedValue(undefined)};
 }
 describe('in-app updater',()=>{
+  it('routes deb installs to manual download without checking or installing an AppImage',async()=>{
+    mocks.invoke.mockResolvedValue(false);
+    const service=await import('./app-updater');
+    const result=await service.checkNativeUpdate();
+    expect(result).toMatchObject({available:false,supported:false,manualDownload:true});
+    expect(mocks.invoke).toHaveBeenCalledWith('supports_in_app_updates');
+    expect(mocks.check).not.toHaveBeenCalled();
+    await expect(service.installNativeUpdate(vi.fn())).rejects.toThrow('从官网下载');
+    expect(mocks.check).not.toHaveBeenCalled();
+  });
+  it('does not attempt an update if package support cannot be determined',async()=>{
+    mocks.invoke.mockRejectedValue(new Error('Capability unavailable'));
+    const service=await import('./app-updater');
+    await expect(service.checkNativeUpdate()).rejects.toThrow('Capability unavailable');
+    expect(mocks.check).not.toHaveBeenCalled();
+  });
   it('closes stale resources and reports no update without installing',async()=>{
     const next=update();mocks.check.mockResolvedValueOnce(next).mockResolvedValueOnce(null);
     const service=await import('./app-updater');

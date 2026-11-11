@@ -28,6 +28,11 @@ concurrency:
   group: desktop-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  linux:
+    uses: ./.github/workflows/linux.yml
+    with:
+      sign_updates: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+    secrets: inherit
   desktop:
     strategy:
       fail-fast: false
@@ -252,7 +257,7 @@ jobs:
           if-no-files-found: error
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: desktop
+    needs: [desktop, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
