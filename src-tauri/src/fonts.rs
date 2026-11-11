@@ -88,6 +88,8 @@ pub(crate) fn candidate(name: &str) -> bool {
         "stheiti",
         "noto sans cjk sc",
         "noto serif cjk sc",
+        "noto sans cjk",
+        "noto serif cjk",
         "source han sans sc",
         "source han serif sc",
         "wenquanyi",
@@ -461,6 +463,8 @@ mod tests {
     #[test]
     fn recognizes_common_cjk_file_names_as_well_as_family_names() {
         assert!(candidate("NotoSansCJKsc-Regular.otf"));
+        assert!(candidate("NotoSansCJK-Regular.ttc"));
+        assert!(candidate("NotoSerifCJK-Bold.ttc"));
         assert!(candidate("SourceHanSansSC-Regular.otf"));
         assert!(!candidate("Arial.ttf"));
     }

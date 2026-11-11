@@ -373,7 +373,7 @@ fn is_macos_utc_alias(zone: &str) -> bool {
 
 pub fn timezone_names_match(current: &str, expected: &str) -> bool {
     current == expected
-        || (cfg!(target_os = "macos")
+        || (cfg!(any(target_os = "macos", target_os = "linux"))
             && is_macos_utc_alias(current)
             && is_macos_utc_alias(expected))
 }

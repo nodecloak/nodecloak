@@ -81,6 +81,19 @@ pub(super) fn font_evidence() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn timezone_verification_accepts_canonical_utc_links_without_accepting_seasonal_zones() {
+        for alias in ["UTC", "GMT", "Etc/UTC", "Etc/GMT"] {
+            assert!(super::super::timezone_names_match("Etc/UTC", alias));
+            assert!(super::super::verify_timezone_values("utc", alias, 0).is_ok());
+            assert!(super::super::verify_timezone_values("utc", alias, -480).is_err());
+        }
+        assert!(!super::super::timezone_names_match(
+            "Europe/London",
+            "Etc/UTC"
+        ));
+    }
     #[test]
     fn appimage_external_tools_do_not_inherit_bundle_but_self_helpers_do() {
         let exe = Path::new("/tmp/.mount_NodeCloak/usr/bin/nodecloak");

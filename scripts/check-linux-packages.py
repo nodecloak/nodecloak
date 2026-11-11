@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import tempfile
 import time
@@ -25,6 +26,19 @@ try:
             env = dict(os.environ, HOME=directory, XDG_CONFIG_HOME=directory + "/config",
                        XDG_DATA_HOME=directory + "/data", XDG_CACHE_HOME=directory + "/cache",
                        APPIMAGE_EXTRACT_AND_RUN="1", WEBKIT_DISABLE_DMABUF_RENDERER="1")
+            profile = Path(directory) / "browser-firefox"
+            profile.mkdir()
+            settings = {"version": 1, "seed": "11" * 32, "enabled": True,
+                        **{key: True for key in ("canvasNoise", "fontNoise", "webglNoise", "audioNoise", "mediaNoise")}}
+            (profile / "nodecloak-fingerprint-extension.json").write_text(json.dumps(settings))
+            request = json.dumps({"type": "get_settings"}).encode()
+            host = subprocess.run([str(program), str(profile / "com.nodecloak.fingerprint.json"), "fingerprint@nodecloak.com"],
+                                  input=struct.pack("<I", len(request)) + request, capture_output=True,
+                                  env=dict(env, NODECLOAK_FIREFOX_PROFILE=str(profile)), timeout=60)
+            assert host.returncode == 0, host.stderr.decode(errors="replace")
+            length, = struct.unpack("<I", host.stdout[:4])
+            assert length == len(host.stdout) - 4
+            assert json.loads(host.stdout[4:]) == {"fingerprint": settings}
             with tempfile.TemporaryFile() as log:
                 process = subprocess.Popen([str(program)], env=env, stdout=log, stderr=log, start_new_session=True)
                 try:
@@ -40,7 +54,7 @@ try:
                     log.seek(0)
                     diagnostic = log.read().decode(errors="replace")
                     assert visible and process.poll() is None, f"{name} failed to show its window: {diagnostic}"
-                    report["packages"][name] = {"installedOrExtracted": True, "visibleWindow": True, "aliveAfterStartup": True}
+                    report["packages"][name] = {"installedOrExtracted": True, "nativeMessaging": True, "visibleWindow": True, "aliveAfterStartup": True}
                 finally:
                     if process.poll() is None:
                         os.killpg(process.pid, signal.SIGTERM)

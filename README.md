@@ -67,7 +67,7 @@
 
 Windows、macOS 和 Linux AppImage 用户可以在应用内检查更新。Windows 便携版通过应用内更新时会安装安装版，原便携文件保留。Ubuntu deb 用户请下载新版后重新安装；已有副本和设置继续保留。
 
-Ubuntu AppImage 首次使用可运行 `chmod +x ./NodeCloak_5.0.2_linux_x64.AppImage`，再双击或从终端启动。若提示缺少 FUSE 2，可安装 `libfuse2t64`，或选择 deb 安装包。请安装可直接运行的 Chrome、Edge、Firefox 或 Chromium；Snap / Flatpak 浏览器的沙箱可能限制自定义副本目录和本地连接。
+Ubuntu 需要 X11 或提供 XWayland 的桌面环境。AppImage 首次使用可运行 `chmod +x ./NodeCloak_5.0.2_linux_x64.AppImage`，再双击或从终端启动。若提示缺少 FUSE 2，可安装 `libfuse2t64`，或选择 deb 安装包。请使用原生 Chrome、Edge 或 Mozilla Firefox 的 deb / tar 版本；Snap / Flatpak 浏览器暂不支持，其沙箱限制专用副本目录与扩展宿主访问。
 
 ## 快速上手
 
