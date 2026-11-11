@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.macos_arm64_only && '[{"os":"macos-26","platform":"macos-arm64","target":"aarch64-apple-darwin"}]' || (inputs.macos_intel_only && '[{"os":"macos-15-intel","platform":"macos-x64","target":"x86_64-apple-darwin"}]' || '[{"os":"windows-latest","platform":"windows-x64","target":"x86_64-pc-windows-msvc"},{"os":"macos-15","platform":"macos-arm64","target":"aarch64-apple-darwin"},{"os":"macos-15-intel","platform":"macos-x64","target":"x86_64-apple-darwin"}]')) }}
+        include: ${{ fromJSON(inputs.macos_arm64_only && '[{"os":"macos-26","platform":"macos-arm64","target":"aarch64-apple-darwin"}]' || (inputs.macos_intel_only && '[{"os":"macos-15-intel","platform":"macos-x64","target":"x86_64-apple-darwin"}]' || '[{"os":"windows-latest","platform":"windows-x64","target":"x86_64-pc-windows-msvc"},{"os":"macos-26","platform":"macos-arm64","target":"aarch64-apple-darwin"},{"os":"macos-15-intel","platform":"macos-x64","target":"x86_64-apple-darwin"}]')) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
