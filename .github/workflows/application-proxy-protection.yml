@@ -1,7 +1,7 @@
 name: Application proxy fail-closed checks
 on:
   push:
-    branches: [codex/application-proxy-fail-closed]
+    branches: [codex/application-proxy-fail-closed, codex/application-proxy-cli]
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,4 +36,6 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_application_proxy_routes_tcp_udp_and_releases_only_owned_network -- --ignored --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_persistent_application_guard_survives_helper_and_core_failure -- --ignored --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_cli_discovery_resolves_assigned_nodes_and_routes_tcp_udp -- --ignored --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}

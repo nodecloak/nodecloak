@@ -1745,5 +1745,6 @@
   "打开官网下载页": "Open official downloads",
   "已阻止直连": "Direct connections blocked",
   "代理不可用，指定应用已阻止直连。重新连接代理或手动停止后恢复普通网络。": "Proxy unavailable. Direct connections are blocked for assigned apps. Restore the proxy or explicitly stop application proxy to return to normal networking.",
-  "断线保护：代理故障时阻止指定应用直连；无法识别所属程序的连接也会阻断。主动停止应用代理后恢复普通网络。": "Connection protection: assigned apps cannot connect directly if the proxy fails. Connections whose owning program cannot be identified are also blocked. Explicitly stop application proxy to restore normal networking."
+  "断线保护：代理故障时阻止指定应用直连；无法识别所属程序的连接也会阻断。主动停止应用代理后恢复普通网络。": "Connection protection: assigned apps cannot connect directly if the proxy fails. Connections whose owning program cannot be identified are also blocked. Explicitly stop application proxy to restore normal networking.",
+  "Claude Code 使用 Claude 的节点；Codex CLI 使用 Codex 的节点。支持原生 CLI 和 npm 附带的原生程序。": "Claude Code uses the Claude node; Codex CLI uses the Codex node. Native CLIs and native executables bundled with npm are supported."
 }

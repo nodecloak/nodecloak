@@ -156,6 +156,20 @@ fn same_executable_name_does_not_conflate_codex_with_chatgpt() {
 }
 
 #[test]
+fn windows_native_cli_installations_use_their_product_proxy_without_matching_shared_node(){
+    for (path,id) in [
+        (r"C:\Users\test\.local\bin\claude.exe","claude"),
+        (r"C:\Users\test\.local\bin\codex.exe","codex"),
+        (r"C:\Users\test\AppData\Roaming\npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe","codex"),
+        (r"D:\Tools\npm\node_modules\@openai\codex\vendor\x86_64-pc-windows-msvc\codex\codex.exe","codex"),
+        (r"C:\Users\test\AppData\Local\pnpm\global\5\.pnpm\fixture\node_modules\@openai\codex-win32-arm64\vendor\aarch64-pc-windows-msvc\bin\codex.exe","codex"),
+    ]{assert_eq!(discovery::identify(path),Some(id),"{path}");}
+    for path in [r"C:\Tools\claude.exe",r"C:\Tools\codex.exe",r"C:\Program Files\nodejs\node.exe",r"C:\npm\node_modules\@unrelated\codex\vendor\x86_64-pc-windows-msvc\bin\codex.exe",r"C:\npm\node_modules\@openai\codex-other\vendor\x86_64-pc-windows-msvc\bin\codex.exe"]{
+        assert_eq!(discovery::identify(path),None,"{path}");
+    }
+}
+
+#[test]
 fn windows_path_case_and_extended_prefix_cannot_silently_fall_through_to_direct() {
     for path in [r"C:\Apps\Codex.exe", r"\\?\c:\APPS\CODEX.exe"] {
         let v = config::compile(&[rule(path)], &[proxy()], 51234, &"a".repeat(64), ID).unwrap();

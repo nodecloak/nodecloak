@@ -433,7 +433,7 @@ pub(super) async fn clear_protection()->Result<(),String>{
     if !ended||super::windows::protection::active()?{return Err("断网保护尚未解除，请重试停止应用代理".into());}
     Ok(())
 }
-fn resolve(
+pub(super) fn resolve(
     settings: &Settings,
     apps: &[DetectedApp],
 ) -> Result<(Vec<ResolvedRule>, Vec<String>), String> {

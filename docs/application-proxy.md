@@ -16,6 +16,10 @@ SOCKS5 节点带认证时填写 socks5://用户名:密码@服务器:端口。密
 
 应用按可执行文件完整路径匹配。Codex 的桌面进程也可能叫 `ChatGPT.exe`，NodeCloak 根据安装位置区分产品，不会只按这个文件名判断。自动识别的已知版本目录可跟随应用更新；手动选择的程序按所选路径匹配。位于其他路径的同名程序不会自动套用此规则。
 
+Windows 的 Claude Code 原生 CLI（`~/.local/bin/claude.exe`）与 Claude 桌面端共用「Claude」的节点。Codex CLI 是 OpenAI 的编码命令行工具，使用「Codex」一栏的节点，不使用「ChatGPT」桌面端的节点；支持原生 CLI 及 npm 包内置的 Windows 原生 `codex.exe`（包括嵌套平台包和旧 vendor 布局）。即使 CLI 尚未运行，也会检查常见安装位置。保存节点后重新开启应用代理，再在 CLI 中重新连接。
+
+只由共享 `node.exe` 执行 JavaScript 的旧版 CLI 不会自动套用这些规则，以免影响所有 Node.js 程序。需要使用原生 CLI，或在 npm 中使用附带原生程序的版本。WSL 内的 Linux CLI 不属于 Windows 可执行文件规则；macOS 的 CLI 识别本次未扩展。
+
 macOS 选择 `.app` 时会包括包内的主程序及实际可执行的子程序，网络请求由应用自带 Helper 发出时也能匹配。应用更新、移动或更名后，先停止应用代理，再点击「重新识别」；手动选择的应用需要重新选择。共享的系统进程、浏览器或应用包之外的程序不属于该规则。自动识别会核对产品身份，不能仅靠把另一个程序改名为 Codex 或 Claude 来匹配。
 
 如果 Codex 与 ChatGPT 在同一个 `.app` 中，列表显示「Codex / ChatGPT」，两者共用一条应用规则；独立安装的 ChatGPT 仍可单独设置。

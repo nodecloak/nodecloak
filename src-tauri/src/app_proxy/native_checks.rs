@@ -344,6 +344,48 @@ fn installed_application_inventory_distinguishes_products() {
 }
 
 #[tokio::test(flavor="multi_thread",worker_threads=2)]
+#[ignore="Creates TUN and WFP policy on a disposable elevated Windows runner only"]
+async fn native_cli_discovery_resolves_assigned_nodes_and_routes_tcp_udp(){
+    use super::{cli,discovery,windows::protection};
+    assert!(security::elevated());assert!(!protection::active().unwrap());
+    struct Cleanup;impl Drop for Cleanup{fn drop(&mut self){protection::clear().unwrap();}}
+    let _cleanup=Cleanup;
+    let root=tempfile::tempdir().unwrap();let home=root.path().join("user");let npm=home.join("npm");
+    let base=root.path().join("probe.exe");
+    assert!(Command::new("rustc").arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/application_proxy_probe.rs")).args(["--edition=2021","-o"]).arg(&base).status().unwrap().success());
+    let claude=home.join(".local/bin/claude.exe");
+    let codex=npm.join("node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe");
+    for path in [&claude,&codex]{std::fs::create_dir_all(path.parent().unwrap()).unwrap();std::fs::copy(&base,path).unwrap();}
+    let pnpm=root.path().join("pnpm-global");
+    let wrapper=root.path().join(".pnpm/codex-version/node_modules/@openai/codex");
+    std::fs::create_dir_all(&wrapper).unwrap();
+    let pnpm_codex=wrapper.parent().unwrap().join("codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe");
+    std::fs::create_dir_all(pnpm_codex.parent().unwrap()).unwrap();std::fs::copy(&base,&pnpm_codex).unwrap();
+    let link=pnpm.join("node_modules/@openai/codex");std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+    std::os::windows::fs::symlink_dir(&wrapper,&link).unwrap();
+    let mut apps=discovery::empty_apps();cli::discover_in(&mut apps,&home,&[npm,pnpm]);
+    assert_eq!(apps.iter().find(|a|a.id=="codex").unwrap().paths.len(),2,"dormant pnpm CLI missed");
+    let mut settings=Settings::default();
+    for rule in &mut settings.rules{if ["claude","codex"].contains(&rule.app.as_str()){rule.enabled=true;rule.proxy_id=Some(ID.into());}}
+    let (rules,_)=super::runtime::resolve(&settings,&apps).unwrap();
+    assert_eq!(rules.len(),2);assert!(rules.iter().all(|r|r.proxy_id==ID));
+    let fixture=Fixture::start();let mut req=request(&[],fixture.port);req.rules=rules;
+    let (mut pipe,helper,luid)=begin(&req).await;
+    let interface=super::config::interface_name(&req.session).unwrap();
+    for path in [&claude,&codex,&pnpm_codex]{for mode in ["tcp","udp"]{
+        let output=Command::new(path).arg(mode).output().unwrap();
+        assert!(output.status.success(),"{} {mode} missed assigned proxy: {output:?}",path.display());
+    }}
+    assert_eq!(fixture.hits.load(Ordering::Acquire),6);
+    let unrelated=root.path().join("node.exe");std::fs::copy(&base,&unrelated).unwrap();
+    assert!(!Command::new(unrelated).arg("tcp").output().unwrap().status.success());
+    assert_eq!(fixture.hits.load(Ordering::Acquire),6,"shared Node runtime was proxied");
+    stop_confirmed(&mut pipe,&helper).await;drop(pipe);exited(helper,&interface,luid).await;
+    assert!(!protection::active().unwrap());
+    println!("Claude Code native + npm Codex CLI: discovered, resolved, TCP/UDP assigned node verified; unrelated Node excluded");
+}
+
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
 #[ignore="Persistent WFP filters and routes: disposable elevated Windows runner only"]
 async fn native_persistent_application_guard_survives_helper_and_core_failure(){
     use super::windows::protection;

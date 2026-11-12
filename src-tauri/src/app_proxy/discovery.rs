@@ -26,6 +26,7 @@ pub fn identify(path: &str) -> Option<&'static str> {
         return super::macos_bundle::identify(path);
     }
     let path = normalize(path);
+    if let Some(id)=super::cli::identify_windows(&path){return Some(id);}
     if path.as_bytes().get(1) == Some(&b':')
         && path
             .get(2..)
@@ -164,18 +165,15 @@ pub fn discover() -> Result<Vec<DetectedApp>, String> {
                 scan(&mut apps, &std::path::PathBuf::from(&local).join(suffix), 3);
             }
         }
+        let mut cli_roots=Vec::new();
+        if let Some(appdata)=std::env::var_os("APPDATA"){cli_roots.push(std::path::PathBuf::from(appdata).join("npm"));}
+        if let Some(local)=std::env::var_os("LOCALAPPDATA"){cli_roots.push(std::path::PathBuf::from(local).join("pnpm/global/5"));}
+        if let Some(path)=std::env::var_os("PATH"){cli_roots.extend(std::env::split_paths(&path).take(124));}
+        super::cli::discover_in(&mut apps,&crate::platform::home_dir(),&cli_roots);
+        let running:Vec<_>=system.processes().values().filter_map(|p|p.exe().and_then(|p|p.to_str())).map(|p|normalize(&canonical_executable(p))).collect();
         for app in &mut apps {
-            app.running = system
-                .processes()
-                .values()
-                .filter(|p| {
-                    p.exe().and_then(|p| p.to_str()).is_some_and(|path| {
-                        app.paths
-                            .iter()
-                            .any(|known| normalize(known) == normalize(path))
-                    })
-                })
-                .count() as u32;
+            let paths:BTreeSet<_>=app.paths.iter().map(|p|normalize(&canonical_executable(p))).collect();
+            app.running=running.iter().filter(|p|paths.contains(*p)).count() as u32;
         }
     }
     for app in &mut apps {

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod checks;
 pub(crate) mod commands;
+mod cli;
 mod config;
 mod discovery;
 pub(crate) mod helper;
