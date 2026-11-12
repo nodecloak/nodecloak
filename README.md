@@ -62,12 +62,12 @@
 | Windows x64，想直接运行 | `_windows_x64_portable.exe` | 下载后直接打开 |
 | macOS，Apple Silicon / M 系列 | `_macos_arm64.dmg` | 将应用拖入 Applications |
 | macOS，Intel | `_macos_x64.dmg` | 将应用拖入 Applications |
-| Ubuntu 24.04+ x64 | `_linux_x64.deb` | 使用 `sudo apt install ./NodeCloak_5.0.2_linux_x64.deb` 安装 |
+| Ubuntu 24.04+ x64 | `_linux_x64.deb` | 使用 `sudo apt install ./NodeCloak_5.0.3_linux_x64.deb` 安装 |
 | Ubuntu 24.04+ x64，想直接运行 | `_linux_x64.AppImage` | 允许文件作为程序执行后打开 |
 
 Windows、macOS 和 Linux AppImage 用户可以在应用内检查更新。Windows 便携版通过应用内更新时会安装安装版，原便携文件保留。Ubuntu deb 用户请下载新版后重新安装；已有副本和设置继续保留。
 
-Ubuntu 需要 X11 或提供 XWayland 的桌面环境。AppImage 首次使用可运行 `chmod +x ./NodeCloak_5.0.2_linux_x64.AppImage`，再双击或从终端启动。若提示缺少 FUSE 2，可安装 `libfuse2t64`，或选择 deb 安装包。请使用原生 Chrome、Edge 或 Mozilla Firefox 的 deb / tar 版本；Snap / Flatpak 浏览器暂不支持，其沙箱限制专用副本目录与扩展宿主访问。
+Ubuntu 需要 X11 或提供 XWayland 的桌面环境。AppImage 首次使用可运行 `chmod +x ./NodeCloak_5.0.3_linux_x64.AppImage`，再双击或从终端启动。若提示缺少 FUSE 2，可安装 `libfuse2t64`，或选择 deb 安装包。请使用原生 Chrome、Edge 或 Mozilla Firefox 的 deb / tar 版本；Snap / Flatpak 浏览器暂不支持，其沙箱限制专用副本目录与扩展宿主访问。
 
 ## 快速上手
 
@@ -90,6 +90,8 @@ Ubuntu 需要 X11 或提供 XWayland 的桌面环境。AppImage 首次使用可�
 4. 让目标应用重新建立连接，在「连接与诊断」查看是否匹配了指定节点。
 
 应用代理默认关闭，开启后临时创建 TUN 接口；停止时释放对应接口和路由。未匹配的程序直连，系统 HTTP 代理和 DNS 配置保持不变。应用自身的代理和本机回环连接可能不走该规则；其他 VPN / TUN 已接管默认路由时，先停止它再开启应用代理。详见[应用代理说明](docs/application-proxy.md)。
+
+Windows 为指定应用提供断线保护，代理故障时阻止直连。Claude Code、Codex CLI 和 VS Code Claude 扩展使用对应应用的节点；在「应用代理 → WSL」接入 Ubuntu 后，先开启代理，再重新打开终端和扩展会话即可使用。手动选择过程序路径的已有配置也适用。
 
 ### 让 AI 通过 MCP 操作浏览器
 
