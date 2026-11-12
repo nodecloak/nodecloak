@@ -268,6 +268,19 @@ def host(root, app, args):
     with tempfile.TemporaryDirectory(prefix="nc-wsl-") as temp:
         address = temp+'/proxy.sock'
         limit = threading.BoundedSemaphore(64)
+        processes=set()
+        process_lock=threading.Lock()
+        closing=threading.Event()
+
+        def stop_relays():
+            with process_lock:
+                closing.set()
+                active=list(processes)
+            for proc in active:
+                if proc.poll() is None:proc.terminate()
+            for proc in active:
+                try:proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:proc.kill();proc.wait()
 
         class Relay(socketserver.BaseRequestHandler):
             def handle(self):
@@ -275,7 +288,10 @@ def host(root, app, args):
                     return
                 proc = None
                 try:
-                    proc = subprocess.Popen([state["windowsExe"], "--nodecloak-wsl-relay", str(endpoint['port'])], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                    with process_lock:
+                        if closing.is_set():return
+                        proc = subprocess.Popen([state["windowsExe"], "--nodecloak-wsl-relay", str(endpoint['port'])], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                        processes.add(proc)
                     def upload():
                         try:
                             while data := self.request.recv(65536):
@@ -284,7 +300,8 @@ def host(root, app, args):
                         except (OSError, BrokenPipeError):
                             pass
                         finally:
-                            proc.stdin.close()
+                            try:proc.stdin.close()
+                            except OSError:pass
                     thread = threading.Thread(target=upload, daemon=True)
                     thread.start()
                     while data := proc.stdout.read1(65536):
@@ -294,11 +311,13 @@ def host(root, app, args):
                     pass
                 finally:
                     if proc is not None:
-                        proc.terminate()
+                        if proc.poll() is None:proc.terminate()
                         try:
                             proc.wait(timeout=3)
                         except subprocess.TimeoutExpired:
                             proc.kill(); proc.wait()
+                        proc.stdout.close()
+                        with process_lock:processes.discard(proc)
                     limit.release()
 
         with ExitStack() as stack:
@@ -306,6 +325,7 @@ def host(root, app, args):
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             stack.callback(server.shutdown)
+            stack.callback(stop_relays)
             ide=None
             port_text=os.environ.get('CLAUDE_CODE_SSE_PORT','')
             if app=='claude' and port_text.isdecimal() and 1024<=int(port_text)<=65535:
@@ -435,6 +455,11 @@ def main():
             if not (root/'integration.json').is_file():
                 raise ValueError('WSL 接入配置已移除，请重新接入')
             old = state_read(root)
+            if 'windowsExe' in payload:
+                payload['windowsExe']=subprocess.check_output(['wslpath','-u',payload['windowsExe']],text=True).strip()
+            # The embedded desktop adapter is the version being enabled. Update
+            # its user-owned file atomically before publishing active state.
+            atomic(root/'agent.py', globals()['source'], 0o700)
             old.update(payload)
             atomic(root/'state.json', json.dumps(old))
             result = {'updated': True}

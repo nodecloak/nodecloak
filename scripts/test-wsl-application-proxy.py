@@ -19,6 +19,49 @@ spec.loader.exec_module(agent)
 
 
 class Integration(unittest.TestCase):
+    def test_tool_exit_releases_a_bridge_that_never_replied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home=Path(tmp);root=agent.root_for(home);relay=home/'relay';pidfile=home/'relay.pid'
+            relay.write_text('#!/usr/bin/env python3\nimport os,time\nopen('+repr(str(pidfile))+',"w").write(str(os.getpid()))\ntime.sleep(30)\n');relay.chmod(0o700)
+            agent.install(home,str(relay),SOURCE.read_text())
+            (root/'state.json').write_text(json.dumps({'enabled':True,'windowsExe':str(relay),'apps':{'codex':{'port':23456,'password':'a'*64}}}))
+            binary=home/'codex';binary.write_text('#!/usr/bin/env python3\nimport os,socket,time,urllib.parse\np=urllib.parse.urlsplit(os.environ["HTTP_PROXY"]);s=socket.create_connection((p.hostname,p.port));s.sendall(b"GET http://fixture.invalid/ HTTP/1.1\\r\\nHost: fixture.invalid\\r\\n\\r\\n")\nfor _ in range(100):\n if os.path.exists('+repr(str(pidfile))+'):break\n time.sleep(.02)\n');binary.chmod(0o700)
+            env=dict(os.environ,PATH=str(home)+':'+os.environ['PATH'])
+            result=subprocess.run([sys.executable,str(SOURCE),'--host',str(root),'codex'],capture_output=True,text=True,env=env,timeout=10)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertTrue(pidfile.exists(),'fixture bridge did not start')
+            pid=int(pidfile.read_text())
+            try:
+                with self.assertRaises(ProcessLookupError):os.kill(pid,0)
+            finally:
+                try:os.kill(pid,15)
+                except ProcessLookupError:pass
+
+    @unittest.skipUnless(os.environ.get('WSL_DISTRO_NAME'),'requires WSL path conversion')
+    def test_deployed_management_protocol_installs_updates_and_removes_in_a_temporary_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home=Path(tmp);settings=home/'.vscode-server/data/Machine/settings.json'
+            settings.parent.mkdir(parents=True);settings.write_text('{ // preserve this\n "editor.fontSize":17,\n "claudeCode.claudeProcessWrapper":"/custom-wrapper"\n}')
+            source=SOURCE.read_text()
+            def manage(action,payload):
+                return subprocess.run([sys.executable,'-c',"import sys; source=sys.stdin.read(); exec(compile(source, 'nodecloak_wsl.py', 'exec'))",'--manage',action,json.dumps(payload)],input=source,capture_output=True,text=True,env=dict(os.environ,HOME=tmp),timeout=15)
+            result=manage('install',{'windowsExe':'C:\\NodeCloak\\nodecloak.exe'})
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertTrue(json.loads(result.stdout)['installed'])
+            # A desktop update must refresh the installed launcher code before
+            # enabling new sessions, rather than continuing an old adapter.
+            root=agent.root_for(home);(root/'agent.py').write_text('raise SystemExit(44)\n')
+            result=manage('state',{'enabled':True,'apps':{'claude':{'port':23456,'password':'a'*64}}})
+            self.assertEqual(result.returncode,0,result.stderr)
+            version_check=subprocess.run([sys.executable,str(root/'agent.py'),'--host',str(root),'claude','--version'],capture_output=True,text=True,env=dict(os.environ,PATH='/nonexistent'),timeout=10)
+            self.assertEqual(version_check.returncode,1,'stale launcher ran after a desktop update')
+            self.assertIn('NodeCloak',version_check.stderr)
+            self.assertNotEqual(manage('remove',{}).returncode,0,'protected integration was removed without Stop')
+            self.assertEqual(manage('state',{'enabled':False,'apps':{}}).returncode,0)
+            result=manage('remove',{});self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(agent.jsonc(settings.read_text())['claudeCode.claudeProcessWrapper'],'/custom-wrapper')
+            self.assertIn('// preserve this',settings.read_text())
+
     def test_protected_launcher_preserves_exit_status_and_forwards_termination(self):
         with tempfile.TemporaryDirectory() as tmp:
             home=Path(tmp);root=agent.root_for(home)

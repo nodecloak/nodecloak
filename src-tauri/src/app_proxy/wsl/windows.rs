@@ -212,12 +212,18 @@ pub async fn prepare(root: &Path, settings: &Settings) -> Result<Vec<Ingress>, S
     // crash must still expose a Stop/recovery action on the next app startup.
     registry.protected = true;
     save(root, &registry)?;
+    let exe = std::env::current_exe().map_err(|_| "无法定位 NodeCloak 程序")?;
     let apps = ingresses
         .iter()
         .map(|i| (i.app.clone(), json!({"port":i.port,"password":i.password})))
         .collect::<serde_json::Map<_, _>>();
     for name in &registry.names {
-        manage(name, "state", json!({"enabled":true,"apps":apps})).await?;
+        manage(
+            name,
+            "state",
+            json!({"enabled":true,"apps":apps,"windowsExe":exe.to_string_lossy()}),
+        )
+        .await?;
     }
     Ok(ingresses)
 }
