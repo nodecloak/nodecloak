@@ -28,6 +28,16 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
         tokio::time::timeout(Duration::from_secs(10), ipc::read_frame(&mut pipe))
             .await
             .map_err(|_| "等待应用代理配置超时")??;
+    #[cfg(windows)]
+    if request.stop_only {
+        let _ownership=process::ownership_mutex()?;
+        let result=super::windows::protection::clear();
+        let reply=match &result{Ok(())=>Reply::Stopped,Err(message)=>Reply::Failure{message:message.clone()}};
+        ipc::write_frame(&mut pipe,&reply).await?;
+        return result;
+    }
+    #[cfg(target_os="macos")]
+    if request.stop_only {return Err("当前系统不支持持久断网保护恢复".into());}
     // Validate before any privileged filesystem or network operation.
     let validation = (|| {
         let core_config = config::compile(
@@ -57,10 +67,14 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
         }
     };
     let cancel = Arc::new(AtomicBool::new(false));
+    let explicit_stop=Arc::new(AtomicBool::new(false));
+    let stopped_by_user=explicit_stop.clone();
     let control_cancel = cancel.clone();
     let (mut input, mut output) = tokio::io::split(pipe);
     let control = tokio::spawn(async move {
-        let _ = ipc::read_frame::<_, Control>(&mut input).await;
+        if matches!(ipc::read_frame::<_, Control>(&mut input).await,Ok(Control::Stop)) {
+            stopped_by_user.store(true,Ordering::Release);
+        }
         control_cancel.store(true, Ordering::Release);
     });
     struct Reader(tokio::task::JoinHandle<()>);
@@ -71,6 +85,8 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
     }
     let _reader = Reader(control);
     let worker_cancel = cancel.clone();
+    #[cfg(windows)]
+    super::windows::protection::replace(&request.rules,0)?;
     #[cfg(target_os = "macos")]
     let original_network = network::signature()?;
     let worker_interface = interface.clone();
@@ -126,6 +142,8 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
                             .await
                             .is_ok_and(|r| r.status().is_success())
                     {
+                        #[cfg(windows)]
+                        super::windows::protection::replace(&request.rules,luid.unwrap())?;
                         ipc::write_frame(
                             &mut output,
                             &Reply::Ready {
@@ -201,6 +219,10 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
         stopped?;
         released?;
         captured?;
+        // Only a deliberate Stop removes protection. EOF, core/helper/GUI
+        // failures leave persistent WFP filters in place after TUN teardown.
+        #[cfg(windows)]
+        if explicit_stop.load(Ordering::Acquire) {super::windows::protection::clear()?;}
         outcome?;
         ipc::write_frame(&mut output, &Reply::Stopped).await.ok();
         Ok(())

@@ -1,0 +1,36 @@
+name: Application proxy fail-closed checks
+on:
+  push:
+    branches: [codex/application-proxy-fail-closed]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: node scripts/prepare-singbox.mjs
+      - run: npm run build
+      - run: npx vitest run src/ApplicationProxy.test.tsx --maxWorkers=2
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib app_proxy
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --locked
+      - name: Verify assigned proxy, fail-closed persistence and explicit recovery
+        shell: pwsh
+        run: |
+          $env:NODECLOAK_TEST_APP_PROXY_HOST="$env:GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"
+          $env:NODECLOAK_TEST_SINGBOX="$env:GITHUB_WORKSPACE/.tools/singbox/win32-x64/sing-box.exe"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_application_proxy_routes_tcp_udp_and_releases_only_owned_network -- --ignored --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_persistent_application_guard_survives_helper_and_core_failure -- --ignored --nocapture --test-threads=1
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}

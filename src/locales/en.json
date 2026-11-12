@@ -1742,5 +1742,8 @@
   "请先填写前置代理地址": "Enter a first-hop proxy address first",
   "当前安装方式使用手动更新": "This installation uses manual updates",
   "当前安装方式请从官网下载并安装新版。副本和设置会保留。": "Download and install the latest version from the official website. Your profiles and settings will be preserved.",
-  "打开官网下载页": "Open official downloads"
+  "打开官网下载页": "Open official downloads",
+  "已阻止直连": "Direct connections blocked",
+  "代理不可用，指定应用已阻止直连。重新连接代理或手动停止后恢复普通网络。": "Proxy unavailable. Direct connections are blocked for assigned apps. Restore the proxy or explicitly stop application proxy to return to normal networking.",
+  "断线保护：代理故障时阻止指定应用直连；主动停止应用代理后恢复普通网络。": "Connection protection: assigned apps cannot connect directly if the proxy fails. Explicitly stop application proxy to restore normal networking."
 }

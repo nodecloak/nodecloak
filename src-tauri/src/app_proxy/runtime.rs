@@ -66,6 +66,7 @@ pub struct Status {
     pub since: Option<String>,
     pub error: Option<String>,
     pub needs_cleanup: bool,
+    pub protection_active: bool,
     pub connections: Vec<Connection>,
     pub events: Vec<Event>,
     pub warnings: Vec<String>,
@@ -80,6 +81,7 @@ impl Default for Status {
             since: None,
             error: None,
             needs_cleanup: false,
+            protection_active: false,
             connections: vec![],
             events: vec![],
             warnings: vec![],
@@ -138,6 +140,16 @@ impl Runtime {
         }
     }
     pub fn view(&self, root: &Path) -> Result<View, String> {
+        #[cfg(windows)]
+        {
+            let mut status=self.state.lock().map_err(|_|"应用代理状态不可用")?;
+            status.protection_active=super::windows::protection::active()?;
+            if super::windows::protection::pending()? && status.phase!="running" && status.phase!="starting" {
+                status.needs_cleanup=true;
+                status.phase="error".into();
+                status.error=Some("断网保护初始化未完成，请点击停止应用代理以恢复，再重新开启".into());
+            }
+        }
         if !self.history_loaded.swap(true, Ordering::AcqRel) {
             let path = root.join("application-proxy-events.jsonl");
             if crate::profiles::guard_tree(&path).is_ok()
@@ -263,6 +275,7 @@ impl Runtime {
                 },
             );
             let request = super::ipc::StartRequest {
+            stop_only: false,
                 session: session.clone(),
                 controller_port: port,
                 controller_secret: secret.clone(),
@@ -307,7 +320,11 @@ impl Runtime {
     pub async fn stop(&self, root: &Path) -> Result<(), String> {
         self.cancel.store(true, Ordering::Release);
         let _gate = self.gate.lock().await;
-        if self
+        #[cfg(windows)]
+        let protected=super::windows::protection::needs_recovery()?;
+        #[cfg(not(windows))]
+        let protected=false;
+        if !protected && self
             .state
             .lock()
             .is_ok_and(|s| s.phase == "off" && !s.needs_cleanup)
@@ -331,7 +348,7 @@ impl Runtime {
                     self.event(root, "stop_failed", &error);
                     return Err(error);
                 }
-            } else if self.state.lock().is_ok_and(|s| s.needs_cleanup) {
+            } else if !protected && self.state.lock().is_ok_and(|s| s.needs_cleanup) {
                 let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
                 while self.state.lock().is_ok_and(|s| s.needs_cleanup)
                     && tokio::time::Instant::now() < deadline
@@ -343,12 +360,20 @@ impl Runtime {
                 }
             }
         }
+        #[cfg(windows)]
+        if super::windows::protection::needs_recovery()? {
+            if let Err(error)=clear_protection().await {
+                self.event(root,"protection_release_failed",&error);
+                return Err(error);
+            }
+        }
         if let Ok(mut state) = self.state.lock() {
             state.phase = "off".into();
             state.interface = None;
             state.since = None;
             state.error = None;
             state.needs_cleanup = false;
+            state.protection_active = false;
             state.connections.clear();
             state.session = None;
         }
@@ -389,6 +414,19 @@ fn record(state: &Arc<Mutex<Status>>, root: &Path, event: &str, message: &str) {
             }
         }
     }
+}
+#[cfg(windows)]
+pub(super) async fn clear_protection()->Result<(),String>{
+    use super::ipc::{self,StartRequest,Reply};
+    let (mut pipe,helper)=super::windows::transport::connect_helper().await?;
+    let request=StartRequest{stop_only:true,session:uuid::Uuid::new_v4().to_string(),controller_port:0,controller_secret:String::new(),rules:vec![],proxies:vec![]};
+    ipc::write_frame(&mut pipe,&request).await?;
+    let reply:Reply=tokio::time::timeout(Duration::from_secs(15),ipc::read_frame(&mut pipe)).await.map_err(|_|"解除断网保护超时，保护仍保留")??;
+    match reply{Reply::Stopped=>{},Reply::Failure{message}=>return Err(message),_=>return Err("解除断网保护响应无效".into())}
+    drop(pipe);
+    let ended=tokio::task::spawn_blocking(move||helper.wait(12000)).await.map_err(|_|"等待断网保护控制程序退出失败")?;
+    if !ended||super::windows::protection::active()?{return Err("断网保护尚未解除，请重试停止应用代理".into());}
+    Ok(())
 }
 fn resolve(
     settings: &Settings,

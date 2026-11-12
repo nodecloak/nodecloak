@@ -11,6 +11,8 @@ pub struct Hello {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartRequest {
+    #[serde(default)]
+    pub stop_only: bool,
     pub session: String,
     pub controller_port: u16,
     pub controller_secret: String,

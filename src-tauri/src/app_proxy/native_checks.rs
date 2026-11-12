@@ -39,6 +39,7 @@ async fn synthetic_socks_fixture_carries_a_complete_request_without_tun() {
 }
 fn request(paths: &[(String, String)], port: u16) -> ipc::StartRequest {
     ipc::StartRequest {
+        stop_only: false,
         session: uuid::Uuid::new_v4().to_string(),
         controller_port: TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -135,6 +136,10 @@ async fn native_application_proxy_routes_tcp_udp_and_releases_only_owned_network
         security::elevated(),
         "Run only on an elevated disposable Windows runner"
     );
+    assert!(!super::windows::protection::active().unwrap(),"requires a clean disposable runner");
+    struct ClearProtection;
+    impl Drop for ClearProtection {fn drop(&mut self){super::windows::protection::clear().unwrap();}}
+    let _protection_cleanup=ClearProtection;
     let root = tempfile::tempdir().unwrap();
     let base = root.path().join("probe.exe");
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -246,6 +251,7 @@ async fn native_application_proxy_routes_tcp_udp_and_releases_only_owned_network
         .unwrap();
     drop(pipe);
     exited(helper, &name, luid).await;
+    assert!(!super::windows::protection::active().unwrap(),"explicit Stop must restore ordinary network access");
     assert_eq!(
         stable_network(),
         before,
@@ -258,6 +264,9 @@ async fn native_application_proxy_routes_tcp_udp_and_releases_only_owned_network
     drop(pipe);
     exited(helper, &name, luid).await;
     assert_eq!(stable_network(), before, "owner EOF left routing behind");
+    assert!(super::windows::protection::active().unwrap(),"owner EOF silently removed fail-closed protection");
+    super::runtime::clear_protection().await.unwrap();
+    assert!(!super::windows::protection::active().unwrap());
     // A dead selected proxy must fail; it must not switch to another outbound.
     let dead = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = dead.local_addr().unwrap().port();
@@ -329,5 +338,45 @@ fn installed_application_inventory_distinguishes_products() {
         for path in app.paths {
             println!("  {path}");
         }
+    }
+}
+
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
+#[ignore="Persistent WFP filters and routes: disposable elevated Windows runner only"]
+async fn native_persistent_application_guard_survives_helper_and_core_failure(){
+    use super::windows::protection;
+    assert!(security::elevated());
+    assert!(!protection::active().unwrap(),"never run against real application protection");
+    struct Cleanup;
+    impl Drop for Cleanup{fn drop(&mut self){protection::clear().unwrap();}}
+    let _cleanup=Cleanup;
+    let root=tempfile::tempdir().unwrap();
+    let base=root.path().join("unmatched.exe");
+    let source=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/application_proxy_probe.rs");
+    assert!(Command::new("rustc").arg(source).args(["--edition=2021","-o"]).arg(&base).status().unwrap().success());
+    let selected=root.path().join("selected.exe");std::fs::copy(&base,&selected).unwrap();
+    let probe=|path:&std::path::Path|Command::new(path).arg("external-connect").output().unwrap().status.success();
+    assert!(probe(&selected),"runner must reach baseline external TCP endpoint");
+    let fixture=Fixture::start();
+    for failure in ["core","helper","owner"]{
+        let req=request(&[("Selected".into(),selected.to_string_lossy().into_owned())],fixture.port);
+        let (pipe,helper,luid)=begin(&req).await;
+        let name=super::config::interface_name(&req.session).unwrap();
+        if failure=="core"{
+            let mut system=sysinfo::System::new_all();system.refresh_processes(sysinfo::ProcessesToUpdate::All,true);
+            let core=system.processes().values().find(|p|p.parent().is_some_and(|p|p.as_u32()==helper.pid())&&p.name().to_string_lossy().eq_ignore_ascii_case("sing-box.exe")).expect("owned core missing");
+            assert!(core.kill());
+        }else if failure=="helper"{
+            assert_ne!(unsafe{windows_sys::Win32::System::Threading::TerminateProcess(helper.0,99)},0);
+        }
+        drop(pipe);
+        exited(helper,&name,luid).await;
+        assert!(protection::active().unwrap(),"{failure} removed protection");
+        assert!(!probe(&selected),"{failure} leaked selected app over direct TCP");
+        assert!(probe(&base),"{failure} blocked unrelated app");
+        super::runtime::clear_protection().await.unwrap();
+        assert!(!protection::active().unwrap());
+        assert!(probe(&selected),"explicit recovery did not restore connectivity");
+        println!("{failure}: persistent blocking and explicit recovery verified");
     }
 }

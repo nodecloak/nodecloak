@@ -15,6 +15,14 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.resetAllMocks();});
 const button=(text:string)=>Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent?.includes(text));
+it('keeps Stop available after a crash with persistent direct-connection protection',async()=>{
+ Object.assign(view.runtime,{phase:'error',protectionActive:true,error:'代理内核意外退出'});
+ await act(async()=>root.render(<ApplicationProxy/>));
+ expect(host.textContent).toContain('已阻止直连');
+ expect(button('停止应用代理')).toBeDefined();
+ expect(button('开启应用代理')).toBeUndefined();
+ expect(host.textContent).not.toContain('程序仍使用原来的网络连接');
+});
 it('offers Mac application routing with Mac administrator consent rather than Windows instructions',async()=>{
  Object.assign(view,{platform:'macos'});
  await act(async()=>root.render(<ApplicationProxy/>));

@@ -6,6 +6,11 @@ use std::{
 };
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_default();
+    if mode == "external-connect" {
+        let destination=std::env::args().nth(2).unwrap_or("1.1.1.1:443".into());
+        if TcpStream::connect_timeout(&destination.parse().unwrap(),Duration::from_secs(3)).is_ok(){println!("connected");return;}
+        std::process::exit(2);
+    }
     let result = if mode == "udp" {
         (|| {
             let socket = UdpSocket::bind("0.0.0.0:0")?;
