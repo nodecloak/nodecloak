@@ -27,4 +27,11 @@
 - [x] Add authenticated per-application inbounds and scoped Windows stdio relay, test node mapping/authentication and no direct fallback with the real pinned core.
 - [x] Integrate WSL discovery/setup/removal and lifecycle with runtime. Preserve protection across failures and partially completed preparation, and show WSL connections in diagnostics.
 - [x] Add a VI-aligned WSL integration section and tests for setup/removal, locked states and clear reconnect instructions. Document exact guarantees and limits.
-- [ ] Run Rust/frontend/native/WSL tests; request independent code review; resolve findings and record verification. Packaging is not requested in this turn.
+- [x] Run Rust/frontend/native/WSL tests; request independent code review; resolve findings and record verification. Packaging is not requested in this turn.
+
+## Final evidence
+
+- Implementation commit: `8234510daf64ccf4a40e0da1cb24c3aa394f4883`.
+- Disposable Windows and Linux checks: [run 43145947005](https://github.com/nodecloak/nodecloak/actions/runs/43145947005), both jobs successful. Windows covers real TCP/UDP node routing, VS Code extension discovery with an existing manual application selection, unknown-process rejection, persistent protection after core/helper/owner failure and explicit Stop recovery.
+- Local verification: 53 backend tests; 14 actual WSL adapter tests; 16 frontend tests; compiled desktop debug program; pinned-core Windows/WSL stdio bridge with two different assigned nodes and a killed-core case.
+- Review details and compatibility boundaries: [verification record](../reviews/2026-11-12-wsl-application-proxy.md).

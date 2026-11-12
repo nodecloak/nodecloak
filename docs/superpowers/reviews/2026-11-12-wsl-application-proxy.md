@@ -30,4 +30,4 @@ Private local artifacts: `.qa/wsl-rust.log`, `.qa/wsl-agent.log`, `.qa/wsl-inter
 - Windows extension updates to a different executable path require stopping, rediscovering and restarting application proxy so the new path joins both routing and WFP protection.
 - Other host loopback services, Windows executable helpers, privilege escalation inside protected tools and browser OAuth callback servers may need workflows outside the isolated session. The adapter never silently weakens isolation to make such a workflow succeed.
 
-CI result is recorded in the implementation plan after the disposable-runner checks finish. No package or version release was requested for this change.
+Final implementation `8234510daf64ccf4a40e0da1cb24c3aa394f4883` passed [Windows and Linux CI run 43145947005](https://github.com/nodecloak/nodecloak/actions/runs/43145947005). The disposable Windows runner additionally verified TCP/UDP routing for the native VS Code extension with an existing manually selected Claude executable, unknown-process rejection, core/helper/owner failure protection and deliberate Stop recovery. No package or version release was requested for this change.
