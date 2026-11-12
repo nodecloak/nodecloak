@@ -261,7 +261,7 @@ impl Runtime {
             let mut filtered = settings.clone();
             filtered
                 .rules
-                .retain(|r| rules.iter().any(|rule| rule.id == r.id)||wsl.iter().any(|i|i.app==r.app&&r.executable.is_empty()&&r.enabled));
+                .retain(|r| rules.iter().any(|rule| rule.id == r.id)||wsl.iter().any(|i|i.app==r.app&&r.enabled));
             let proxies =
                 super::store::resolved_proxies(&filtered, &super::store::NativeCredentials)?;
             let reserved = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -479,7 +479,17 @@ fn resolve_with_wsl(settings:&Settings,apps:&[DetectedApp],wsl:&[super::wsl::Ing
                 if cfg!(target_os = "macos") {
                     super::macos_bundle::executables(file)?
                 } else {
-                    vec![rule.executable.clone()]
+                    #[allow(unused_mut)]
+                    let mut paths=vec![rule.executable.clone()];
+                    // Choosing a desktop executable manually does not detach
+                    // that product's native CLI or VS Code adapter from its node.
+                    #[cfg(windows)]
+                    if ["codex","claude"].contains(&rule.app.as_str()) {
+                        if let Some(app)=apps.iter().find(|a|a.id==rule.app) {
+                            paths.extend(app.paths.iter().filter(|p|super::cli::identify_windows(p)==Some(rule.app.as_str())).cloned());
+                        }
+                    }
+                    paths
                 },
             )
         } else if let Some(app) = apps.iter().find(|a| a.id == rule.app) {
@@ -487,13 +497,15 @@ fn resolve_with_wsl(settings:&Settings,apps:&[DetectedApp],wsl:&[super::wsl::Ing
         } else {
             continue;
         };
+        let mut seen=std::collections::BTreeSet::new();
         let paths: Vec<_> = paths
             .into_iter()
             .filter(|p| std::path::Path::new(p).is_file())
             .map(|p| discovery::canonical_executable(&p))
+            .filter(|p|seen.insert(discovery::normalize(p)))
             .collect();
         if paths.is_empty() {
-            if wsl.iter().any(|i|i.app==rule.app&&rule.executable.is_empty()){continue;}
+            if wsl.iter().any(|i|i.app==rule.app){continue;}
             warnings.push(format!("未找到 {name} 的程序文件，本次不启用该规则"));
             continue;
         }
@@ -854,6 +866,20 @@ pub(super) fn connections(
 mod checks {
     use super::*;
     use serde_json::json;
+    #[cfg(windows)]
+    #[test]
+    fn manual_builtin_selection_keeps_native_cli_and_vscode_extension_on_the_same_node(){
+        let temp=tempfile::tempdir().unwrap();let manual=temp.path().join("manual.exe");
+        let extension=temp.path().join(".vscode/extensions/anthropic.claude-code-2.1.322-win32-x64/resources/native-binary/claude.exe");
+        let other=temp.path().join("desktop-other.exe");
+        for file in [&manual,&extension,&other]{std::fs::create_dir_all(file.parent().unwrap()).unwrap();std::fs::write(file,b"fixture").unwrap();}
+        let mut apps=discovery::empty_apps();apps.iter_mut().find(|a|a.id=="claude").unwrap().paths=vec![extension.to_string_lossy().into_owned(),other.to_string_lossy().into_owned()];
+        let mut settings=Settings::default();let rule=settings.rules.iter_mut().find(|r|r.app=="claude").unwrap();
+        rule.enabled=true;rule.proxy_id=Some(uuid::Uuid::new_v4().to_string());rule.executable=manual.to_string_lossy().into_owned();
+        let (rules,_)=resolve(&settings,&apps).unwrap();assert_eq!(rules[0].paths.len(),2);
+        assert!(rules[0].paths.iter().any(|p|Path::new(p).canonicalize().unwrap()==extension.canonicalize().unwrap()));
+        assert!(!rules[0].paths.iter().any(|p|Path::new(p).canonicalize().unwrap()==other.canonicalize().unwrap()));
+    }
     #[test]
     fn inactive_runtime_cannot_edit_rules_while_direct_connection_protection_remains(){
         let runtime=Runtime::default();

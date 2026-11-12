@@ -13,7 +13,7 @@ Scope: existing Codex and Claude application nodes cover Windows VS Code Claude 
 
 ## Verified locally
 
-- Rust app-proxy suite: 51 passed, six opt-in native checks excluded from the ordinary suite.
+- Rust app-proxy suite: 53 passed, six opt-in native checks excluded from the ordinary suite. Existing builtin app rules with manually selected Windows paths retain both their native adapters and the corresponding WSL assignment; custom applications are kept separate.
 - WSL adapter suite: 14 tests, including the actual management protocol running from stdin in a temporary HOME, JSONC preservation, installation retry/removal, explicit Stop, exit/signal forwarding, capability drop, host/external IPv4/IPv6/UDP blocking, Windows interop denial and IDE-port forwarding. A real pseudo-terminal verifies that one Ctrl+C reaches the tool once and leaves its local proxy worker alive for continued use.
 - Pinned Windows sing-box + WSL + actual NodeCloak stdio relay: separate Codex and Claude SOCKS fixtures each receive only their assigned application's request. Missing authentication is rejected. Desktop diagnostics identify the real `http/wsl-*` inbound metadata. Killing the core leaves subsequent protected requests blocked, without increasing either fixture's request count.
 - Actual installed WSL Codex CLI 0.155.0 and Claude extension binary 2.1.322 start successfully with `--version` inside the protected namespace, without a reachable relay. This is startup compatibility evidence, not an authenticated service-login test.

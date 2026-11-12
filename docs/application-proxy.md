@@ -18,7 +18,7 @@ SOCKS5 节点带认证时填写 socks5://用户名:密码@服务器:端口。密
 
 Windows 的 Claude Code 原生 CLI（`~/.local/bin/claude.exe`）与 Claude 桌面端共用「Claude」的节点。Codex CLI 是 OpenAI 的编码命令行工具，使用「Codex」一栏的节点，不使用「ChatGPT」桌面端的节点；支持原生 CLI 及 npm 包内置的 Windows 原生 `codex.exe`（包括嵌套平台包和旧 vendor 布局）。即使 CLI 尚未运行，也会检查常见安装位置。保存节点后重新开启应用代理，再在 CLI 中重新连接。
 
-Windows 本地 VS Code 和 VS Code Insiders 的 Claude Code 扩展也使用「Claude」节点。NodeCloak 识别扩展自带的原生 `claude.exe`，不会把整个 `Code.exe` 或其他扩展都设为代理。扩展或 CLI 更新后先停止应用代理，再重新识别并开启，让新路径同时加入分流和断网保护。
+Windows 本地 VS Code 和 VS Code Insiders 的 Claude Code 扩展也使用「Claude」节点。NodeCloak 识别扩展自带的原生 `claude.exe`，不会把整个 `Code.exe` 或其他扩展都设为代理。即使之前手动选择过 Codex 或 Claude 的桌面程序路径，这些原生 CLI、扩展及 WSL 接入仍沿用对应应用的节点。扩展或 CLI 更新后先停止应用代理，再重新识别并开启，让新路径同时加入分流和断网保护。
 
 只由共享 `node.exe` 执行 JavaScript 的旧版 Windows CLI 不会自动套用这些规则，以免影响所有 Node.js 程序。需要使用原生 CLI，或在 npm 中使用附带原生程序的版本。macOS 的 CLI 识别本次未扩展。
 

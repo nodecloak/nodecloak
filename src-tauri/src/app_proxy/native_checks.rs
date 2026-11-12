@@ -429,6 +429,7 @@ async fn native_cli_discovery_resolves_assigned_nodes_and_routes_tcp_udp(){
     assert_eq!(apps.iter().find(|a|a.id=="codex").unwrap().paths.len(),2,"dormant pnpm CLI missed");
     let mut settings=Settings::default();
     for rule in &mut settings.rules{if ["claude","codex"].contains(&rule.app.as_str()){rule.enabled=true;rule.proxy_id=Some(ID.into());}}
+    settings.rules.iter_mut().find(|r|r.app=="claude").unwrap().executable=claude.to_string_lossy().into_owned();
     let (rules,_)=super::runtime::resolve(&settings,&apps).unwrap();
     assert_eq!(rules.len(),2);assert!(rules.iter().all(|r|r.proxy_id==ID));
     let fixture=Fixture::start();let mut req=request(&[],fixture.port);req.rules=rules;

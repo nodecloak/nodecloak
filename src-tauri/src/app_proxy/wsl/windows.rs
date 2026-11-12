@@ -183,10 +183,7 @@ pub async fn prepare(root: &Path, settings: &Settings) -> Result<Vec<Ingress>, S
     }
     let mut ingresses = vec![];
     let mut reservations = vec![];
-    for rule in settings.rules.iter().filter(|r| {
-        r.enabled && ["codex", "claude"].contains(&r.app.as_str()) && r.executable.is_empty()
-    }) {
-        let proxy_id = rule.proxy_id.clone().ok_or("请为 WSL 应用选择对应节点")?;
+    for (app, proxy_id) in requested(settings)? {
         let listener =
             std::net::TcpListener::bind("127.0.0.1:0").map_err(|_| "无法分配 WSL 应用代理入口")?;
         let port = listener
@@ -195,7 +192,7 @@ pub async fn prepare(root: &Path, settings: &Settings) -> Result<Vec<Ingress>, S
             .port();
         reservations.push(listener);
         ingresses.push(Ingress {
-            app: rule.app.clone(),
+            app,
             proxy_id,
             port,
             password: format!(
@@ -227,6 +224,20 @@ pub async fn prepare(root: &Path, settings: &Settings) -> Result<Vec<Ingress>, S
     }
     Ok(ingresses)
 }
+
+fn requested(settings: &Settings) -> Result<Vec<(String, String)>, String> {
+    settings
+        .rules
+        .iter()
+        .filter(|r| r.enabled && ["codex", "claude"].contains(&r.app.as_str()))
+        .map(|r| {
+            Ok((
+                r.app.clone(),
+                r.proxy_id.clone().ok_or("请为 WSL 应用选择对应节点")?,
+            ))
+        })
+        .collect()
+}
 pub async fn stop(root: &Path) -> Result<(), String> {
     let mut registry = load(root)?;
     if !registry.protected {
@@ -241,6 +252,27 @@ pub async fn stop(root: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod checks {
+    #[test]
+    fn builtin_nodes_also_cover_wsl_when_windows_paths_were_selected_manually() {
+        let mut settings = crate::app_proxy::model::Settings::default();
+        let id = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";
+        let rule = settings
+            .rules
+            .iter_mut()
+            .find(|r| r.app == "claude")
+            .unwrap();
+        rule.enabled = true;
+        rule.proxy_id = Some(id.into());
+        rule.executable = r"C:\Manual\Claude.exe".into();
+        let mut custom = rule.clone();
+        custom.app = "custom".into();
+        custom.id = uuid::Uuid::new_v4().to_string();
+        settings.rules.push(custom);
+        assert_eq!(
+            super::requested(&settings).unwrap(),
+            vec![("claude".into(), id.into())]
+        );
+    }
     #[tokio::test]
     async fn invalid_distribution_names_never_poison_saved_integration_state() {
         let temp = tempfile::tempdir().unwrap();
