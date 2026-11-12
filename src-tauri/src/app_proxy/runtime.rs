@@ -185,9 +185,14 @@ impl Runtime {
         })
     }
     pub fn editable(&self) -> Result<(), String> {
+        #[cfg(windows)]
+        if super::windows::protection::needs_recovery()? {
+            return Err("请先停止应用代理并解除断网保护，再修改规则或节点".into());
+        }
         let status = self.state.lock().map_err(|_| "应用代理状态不可用")?;
         if ["starting", "running", "stopping"].contains(&status.phase.as_str())
             || status.needs_cleanup
+            || status.protection_active
         {
             return Err("请先停止应用代理，再修改规则或节点".into());
         }
@@ -651,15 +656,16 @@ impl Session {
         })
     }
     async fn close(&mut self) -> Result<(), String> {
-        if let Some(mut writer) = self.writer.take() {
+        if let Some(writer) = self.writer.as_mut() {
             let _ = tokio::time::timeout(
                 Duration::from_secs(1),
-                super::ipc::write_frame(&mut writer, &super::ipc::Control::Stop),
+                super::ipc::write_frame(writer, &super::ipc::Control::Stop),
             )
             .await;
-            drop(writer);
         }
-        self.reader.abort();
+        // Keep both halves alive until the helper acknowledges Stop and exits.
+        // Dropping a named-pipe server can discard a queued unread Stop frame,
+        // which must correctly be treated as an unexpected EOF by the helper.
         #[cfg(target_os = "macos")]
         self.helper.close_control();
         let helper = self.helper.clone();
@@ -669,6 +675,8 @@ impl Session {
         if !exited {
             return Err("应用代理仍在退出，请重试停止".into());
         }
+        self.reader.abort();
+        self.writer.take();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         while tokio::time::Instant::now() < deadline {
             if super::driver::network::released(&self.interface, self.luid)? {
@@ -815,6 +823,12 @@ fn connections(
 mod checks {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn inactive_runtime_cannot_edit_rules_while_direct_connection_protection_remains(){
+        let runtime=Runtime::default();
+        runtime.state.lock().unwrap().protection_active=true;
+        assert!(runtime.editable().is_err());
+    }
     #[test]
     fn restart_keeps_diagnostics_but_never_restores_a_running_session() {
         let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();

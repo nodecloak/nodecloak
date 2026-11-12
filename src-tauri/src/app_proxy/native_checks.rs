@@ -109,6 +109,11 @@ async fn exited(helper: security::Handle, name: &str, luid: u64) {
     }
     panic!("owned routes/interface not released");
 }
+async fn stop_confirmed(pipe:&mut tokio::net::windows::named_pipe::NamedPipeServer){
+    ipc::write_frame(pipe,&ipc::Control::Stop).await.unwrap();
+    let reply:Reply=tokio::time::timeout(Duration::from_secs(20),ipc::read_frame(pipe)).await.unwrap().unwrap();
+    assert!(matches!(reply,Reply::Stopped),"helper did not confirm explicit Stop");
+}
 fn stable_network() -> serde_json::Value {
     let state = network::snapshot().unwrap();
     let mut dns: Vec<_> = state
@@ -246,9 +251,7 @@ async fn native_application_proxy_routes_tcp_udp_and_releases_only_owned_network
         count,
         "same basename from another path was incorrectly proxied"
     );
-    ipc::write_frame(&mut pipe, &ipc::Control::Stop)
-        .await
-        .unwrap();
+    stop_confirmed(&mut pipe).await;
     drop(pipe);
     exited(helper, &name, luid).await;
     assert!(!super::windows::protection::active().unwrap(),"explicit Stop must restore ordinary network access");
@@ -280,9 +283,7 @@ async fn native_application_proxy_routes_tcp_udp_and_releases_only_owned_network
             .await
             .unwrap();
     assert!(!output.status.success());
-    ipc::write_frame(&mut pipe, &ipc::Control::Stop)
-        .await
-        .unwrap();
+    stop_confirmed(&mut pipe).await;
     drop(pipe);
     exited(helper, &name, luid).await;
     assert_eq!(stable_network(), before);
