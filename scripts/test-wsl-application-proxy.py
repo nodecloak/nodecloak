@@ -11,6 +11,11 @@ from unittest import mock
 import socket
 import socketserver
 import threading
+import pty
+import fcntl
+import termios
+import time
+import select
 
 SOURCE = Path(__file__).resolve().parents[1] / "src-tauri/src/app_proxy/wsl/agent.py"
 spec = importlib.util.spec_from_file_location("agent", SOURCE)
@@ -19,6 +24,49 @@ spec.loader.exec_module(agent)
 
 
 class Integration(unittest.TestCase):
+    def test_terminal_ctrl_c_reaches_tool_once_without_killing_the_proxy_worker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home=Path(tmp);root=agent.root_for(home)
+            agent.install(home,'/missing-relay',SOURCE.read_text())
+            (root/'state.json').write_text(json.dumps({'enabled':True,'windowsExe':'/missing-relay','apps':{'codex':{'port':23456,'password':'a'*64}}}))
+            binary=home/'codex'
+            binary.write_text('''#!/usr/bin/env python3
+import signal,time,os,socket,urllib.parse
+count=0
+def interrupted(sig,frame):
+ global count
+ count+=1
+signal.signal(signal.SIGINT,interrupted)
+print('READY',flush=True)
+deadline=time.monotonic()+5
+while not count and time.monotonic()<deadline:time.sleep(.02)
+time.sleep(.2)
+p=urllib.parse.urlsplit(os.environ['HTTP_PROXY'])
+s=socket.create_connection((p.hostname,p.port),timeout=2)
+print('COUNT='+str(count),flush=True)
+''');binary.chmod(0o700)
+            master,slave=pty.openpty()
+            def controlling_terminal():
+                os.setsid();fcntl.ioctl(slave,termios.TIOCSCTTY,0)
+            process=subprocess.Popen([sys.executable,str(SOURCE),'--host',str(root),'codex'],stdin=slave,stdout=slave,stderr=slave,env=dict(os.environ,PATH=str(home)+':'+os.environ['PATH']),preexec_fn=controlling_terminal,close_fds=True)
+            os.close(slave);output=b''
+            try:
+                deadline=time.monotonic()+8
+                while b'READY' not in output and time.monotonic()<deadline:
+                    if select.select([master],[],[],.1)[0]:output+=os.read(master,4096)
+                self.assertIn(b'READY',output);os.write(master,b'\x03')
+                while process.poll() is None and time.monotonic()<deadline:
+                    if select.select([master],[],[],.1)[0]:
+                        try:output+=os.read(master,4096)
+                        except OSError:break
+                self.assertEqual(process.wait(timeout=3),0,output.decode(errors='replace'))
+                self.assertIn(b'COUNT=1',output)
+                self.assertNotIn(b'COUNT=2',output)
+                self.assertNotIn(b'KeyboardInterrupt',output)
+            finally:
+                if process.poll() is None:process.kill();process.wait()
+                os.close(master)
+
     def test_tool_exit_releases_a_bridge_that_never_replied(self):
         with tempfile.TemporaryDirectory() as tmp:
             home=Path(tmp);root=agent.root_for(home);relay=home/'relay';pidfile=home/'relay.pid'

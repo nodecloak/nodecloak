@@ -353,8 +353,17 @@ def host(root, app, args):
                           sys.executable, str(root/"agent.py"), "--inside", payload]
             child=subprocess.Popen(invocation,env=env)
             handlers={}
+            def forward(number,frame):
+                # Interactive terminal signals already reach the entire
+                # foreground group, including the tool. Forwarding again turns
+                # one Ctrl+C into two interrupts and can close the session.
+                if number==signal.SIGINT and os.isatty(0):
+                    try:
+                        if os.tcgetpgrp(0)==os.getpgrp():return
+                    except OSError:pass
+                if child.poll() is None:child.send_signal(number)
             for sig in (signal.SIGINT,signal.SIGTERM,signal.SIGHUP):
-                handlers[sig]=signal.signal(sig,lambda number,frame: child.send_signal(number) if child.poll() is None else None)
+                handlers[sig]=signal.signal(sig,forward)
             try:
                 result=child.wait()
                 return 128-result if result<0 else result
@@ -410,6 +419,9 @@ def isolated(payload):
     parent = os.getpid()
     worker = os.fork()
     if worker == 0:
+        # Keep the networking worker alive when a CLI cancels one generation
+        # with Ctrl+C and then continues the same interactive conversation.
+        signal.signal(signal.SIGINT,signal.SIG_IGN)
         libc = ctypes.CDLL(None)
         libc.prctl(1, signal.SIGTERM, 0, 0, 0)  # PR_SET_PDEATHSIG
         if os.getppid() != parent:
