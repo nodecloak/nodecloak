@@ -73,7 +73,7 @@ export default function ApplicationProxy(){
   {!supported&&<div className="ap-notice" role="status">{t('应用代理支持 Windows 和 macOS。当前系统仍可使用浏览器副本代理。')}</div>}
   {view?.simulation&&<div className="ap-notice">{t('交互演示，不会修改电脑网络。')}</div>}
   {supported&&<div className="ap-consent"><ShieldCheck size={17}/><p>{t(view?.platform==='macos'?'开启时将请求 macOS 管理员授权，并临时创建 TUN 网络接口。停止后释放该接口及对应路由；系统 DNS 和 HTTP 代理设置保持不变。':'开启时将请求 Windows 管理员授权，并临时创建 TUN 网络接口。停止后释放该接口及对应路由；系统 DNS 和 HTTP 代理设置保持不变。')}{' '}{t('切换路由可能短暂重连。应用自身的代理设置和本机回环连接不会被覆盖。')}</p></div>}
-  {view?.platform==='windows'&&<p className="ap-footnote">{t('断线保护：代理故障时阻止指定应用直连；主动停止应用代理后恢复普通网络。')}</p>}
+  {view?.platform==='windows'&&<p className="ap-footnote">{t('断线保护：代理故障时阻止指定应用直连；无法识别所属程序的连接也会阻断。主动停止应用代理后恢复普通网络。')}</p>}
   {(error||view?.runtime.error)&&(error||view?.runtime.error)!==dismissed&&<div className="ap-error" role="alert">{t(error||view?.runtime.error)}<button type="button" aria-label={t('关闭提示')} onClick={()=>{setDismissed(error||view?.runtime.error||null);setError('');}}><X size={15}/></button></div>}
   {!view&&!error&&<p role="status" className="ap-loading"><LoaderCircle size={15} className="spin"/>{t('正在读取应用代理设置')}</p>}
   <div className="ap-grid"><section className="ap-card"><header><div><h3><AppWindow size={17}/>{t('应用分流')}</h3><p>{t('选择节点后保存规则，开启应用代理时生效。')}</p></div><div className="ap-actions"><button className="button secondary compact" disabled={!!pending||!supported} onClick={()=>void action('discover')}><RefreshCw size={14} className={pending==='discover'?'spin':''}/>{t('重新识别')}</button><button className="button secondary compact" disabled={locked||!supported} onClick={()=>void choose()}><Plus size={14}/>{t('添加应用')}</button></div></header>
