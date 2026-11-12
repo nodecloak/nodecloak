@@ -185,3 +185,5 @@ node scripts/build-desktop.mjs
 [LINUX DO — 新的理想型社区](https://linux.do/)
 
 [NodeLoc — 自由、平等、友好、开放、有趣的交流社区](https://www.nodeloc.com/)
+
+[支持 NodeCloak](https://sponsorship.forztn.com/github.com/nodecloak/nodecloak)
