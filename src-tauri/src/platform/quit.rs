@@ -1,6 +1,14 @@
 //! Normal quit is asynchronous. A missing AppKit registration is not dispatch.
+#[cfg(any(test,target_os="macos",target_os="linux"))]
 use std::time::{Duration, Instant};
 
+/// A failed termination command may race with a process exiting. Only the
+/// complete profile/lock observation decides whether shutdown failed.
+pub(super) fn finish_force_close(termination:Result<(),String>,closed:impl FnOnce()->Result<(),String>)->Result<(),String>{
+    match closed(){Ok(())=>Ok(()),Err(error)=>Err(termination.err().unwrap_or(error))}
+}
+
+#[cfg(any(test,target_os="macos",target_os="linux"))]
 pub(super) fn wait(
     timeout: Duration,
     mut discover: impl FnMut() -> Result<Vec<u32>, String>,
@@ -37,6 +45,16 @@ pub(super) fn wait(
 mod tests {
     use super::*;
     use std::cell::Cell;
+    #[test]
+    fn force_close_waits_for_verified_release_after_a_racing_termination_failure(){
+        let result=super::finish_force_close(Err("taskkill: process no longer running".into()),||Ok(()));
+        assert_eq!(result,Ok(()));
+    }
+    #[test]
+    fn force_close_preserves_termination_failure_if_the_profile_never_releases(){
+        assert_eq!(super::finish_force_close(Err("taskkill: access denied".into()),||Err("still locked".into())),Err("taskkill: access denied".into()));
+        assert_eq!(super::finish_force_close(Ok(()),||Err("still locked".into())),Err("still locked".into()));
+    }
     #[test]
     fn unregistered_application_is_retried_until_quit_can_be_dispatched() {
         let calls = Cell::new(0);

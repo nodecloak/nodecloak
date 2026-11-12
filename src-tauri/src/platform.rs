@@ -8,7 +8,6 @@ mod desktop_linux;
 mod endpoint;
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
 mod singleton;
-#[cfg(any(test,target_os="macos", target_os = "linux"))]
 mod quit;
 #[cfg(target_os = "linux")]
 mod linux;
@@ -1344,23 +1343,24 @@ pub fn force_close_profile(profile: &Path) -> Result<(), String> {
     if !profile_process_ids(profile)?.is_empty() {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
+    let mut termination=Ok(());
     for pid in profile_process_ids(profile)? {
         #[cfg(windows)]
         if let Err(error) = output("taskkill", &["/PID", &pid.to_string(), "/T", "/F"]) {
             if profile_process_ids(profile)?.contains(&pid) {
-                return Err(error);
+                termination=Err(error);
             }
         }
         #[cfg(not(windows))]
         if let Err(error) = output("/bin/kill", &["-KILL", &pid.to_string()]) {
             if profile_process_ids(profile)?.contains(&pid) {
-                return Err(error);
+                termination=Err(error);
             }
         }
     }
     // TERM/KILL and taskkill completion are not a guarantee that browser
     // helpers and profile locks have already finished releasing resources.
-    wait_profile_closed(profile,std::time::Duration::from_secs(8))
+    quit::finish_force_close(termination,||wait_profile_closed(profile,std::time::Duration::from_secs(8)))
 }
 pub(crate) fn prepare_firefox_profile(profile: &Path) -> Result<PathBuf, String> {
     let failure = |error: std::io::Error| {
