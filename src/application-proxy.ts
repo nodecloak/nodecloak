@@ -1,6 +1,7 @@
 import type {ProxyConfig,ProxyTest} from './browser-profiles';
 import {invoke} from '@tauri-apps/api/core';
 import {native} from './bridge';
+export interface AppProxyView {wsl?:{name:string;installed:boolean}[]}
 export interface AppProxyRule {id:string;app:'codex'|'chatgpt'|'claude'|'custom';executable:string;proxyId:string|null;enabled:boolean}
 export interface AppProxyDestination {id:string;name:string;proxy:ProxyConfig;hasPassword:boolean;preProxyEnabled?:boolean}
 export interface ProxyApplication {id:string;name:string;paths:string[];running:number}

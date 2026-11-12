@@ -16,6 +16,10 @@ struct NodeId {
 struct Rules {
     rules: Vec<Rule>,
 }
+#[cfg(windows)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WslName {name:String}
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, String> {
     serde_json::from_value(value).map_err(|_| "应用代理参数无效".into())
 }
@@ -36,7 +40,15 @@ pub async fn application_proxy_action(
         return Err("应用代理支持 Windows 和 macOS".into());
     }
     match action.as_str() {
-        "discover" => runtime.discover().await?,
+        "discover" => runtime.discover(&root).await?,
+        #[cfg(windows)]
+        "installWsl"|"removeWsl" => {
+            let _lock=runtime.gate.lock().await;
+            runtime.editable(&root)?;
+            let name=decode::<WslName>(payload)?.name;
+            if action=="installWsl" {super::wsl::install(&root,&name).await?;}else{super::wsl::remove(&root,&name).await?;}
+            runtime.discover(&root).await?;
+        }
         "start" => {
             if let Err(error) = runtime.start(&root).await {
                 runtime.rejected_start(&root, &error);
@@ -46,21 +58,21 @@ pub async fn application_proxy_action(
         "stop" => runtime.stop(&root).await?,
         "saveNode" => {
             let _lock = runtime.gate.lock().await;
-            runtime.editable()?;
+            runtime.editable(&root)?;
             store::save_node(&root, decode(payload)?, &NativeCredentials)?;
         }
         "deleteNode" => {
             let _lock = runtime.gate.lock().await;
-            runtime.editable()?;
+            runtime.editable(&root)?;
             store::delete_node(&root, &decode::<NodeId>(payload)?.id, &NativeCredentials)?;
         }
         "saveRules" => {
             let _lock = runtime.gate.lock().await;
-            runtime.editable()?;
+            runtime.editable(&root)?;
             store::save_rules(&root, decode::<Rules>(payload)?.rules)?;
         }
         "pickExecutable" => {
-            runtime.editable()?;
+            runtime.editable(&root)?;
             use tauri_plugin_dialog::DialogExt;
             return tokio::task::spawn_blocking(move || {
                 let dialog = app.dialog().file();

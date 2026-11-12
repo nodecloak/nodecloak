@@ -12,6 +12,66 @@ use std::{
     time::Duration,
 };
 const ID: &str = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";
+#[tokio::test(flavor="multi_thread",worker_threads=2)]
+#[ignore="Pinned core and installed Ubuntu WSL required; loopback only, no TUN or host changes"]
+async fn native_wsl_ingresses_reuse_assigned_nodes_with_authenticated_windows_interop(){
+    use std::io::{Read,Write};
+    let host=std::env::var_os("NODECLOAK_TEST_APP_PROXY_HOST").expect("compiled NodeCloak path");
+    let binary=std::env::var_os("NODECLOAK_TEST_SINGBOX").expect("pinned core path");
+    let first=Fixture::start();let second=Fixture::start();
+    let mut request=request(&[],first.port);
+    let second_id=uuid::Uuid::new_v4().to_string();
+    let mut proxy=request.proxies[0].clone();proxy.id=second_id.clone();proxy.config.port=second.port;request.proxies.push(proxy);
+    let ports:Vec<_>=(0..2).map(|_|TcpListener::bind("127.0.0.1:0").unwrap()).collect();
+    request.wsl=vec![("codex",ID),("claude",second_id.as_str())].into_iter().zip(ports.iter()).map(|((app,id),listener)|super::wsl::Ingress{app:app.into(),proxy_id:id.into(),port:listener.local_addr().unwrap().port(),password:"b".repeat(64)}).collect();
+    let mut config=super::config::compile_for_wsl(super::config::Platform::Windows,&[],&request.proxies,request.controller_port,&request.controller_secret,&request.session,&request.wsl).unwrap();
+    config["inbounds"].as_array_mut().unwrap().retain(|v|v["type"]!="tun");
+    drop(ports);
+    struct Core(std::process::Child);
+    impl Drop for Core {fn drop(&mut self){let _=self.0.kill();let _=self.0.wait();}}
+    let mut core=Core(Command::new(binary).args(["run","--disable-color","-c","stdin"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap());
+    core.0.stdin.take().unwrap().write_all(&serde_json::to_vec(&config).unwrap()).unwrap();
+    for ingress in &request.wsl {
+        let deadline=std::time::Instant::now()+Duration::from_secs(8);
+        loop{if std::net::TcpStream::connect(("127.0.0.1",ingress.port)).is_ok(){break;}assert!(std::time::Instant::now()<deadline,"pinned core did not start");std::thread::sleep(Duration::from_millis(40));}
+        let mut stream=std::net::TcpStream::connect(("127.0.0.1",ingress.port)).unwrap();stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        stream.write_all(b"CONNECT 198.18.0.10:43210 HTTP/1.1\r\nHost: 198.18.0.10:43210\r\n\r\n").unwrap();
+        let mut response=[0;256];let count=stream.read(&mut response).unwrap();assert!(String::from_utf8_lossy(&response[..count]).contains("407"));
+    }
+    assert_eq!(first.hits.load(Ordering::Acquire),0);assert_eq!(second.hits.load(Ordering::Acquire),0);
+    // Observe real Clash metadata while a CONNECT is pending, rather than
+    // inventing an inbound field name for the desktop diagnostics.
+    let mut held=std::net::TcpStream::connect(("127.0.0.1",request.wsl[0].port)).unwrap();
+    use base64::Engine;
+    let auth=base64::engine::general_purpose::STANDARD.encode(format!("nodecloak:{}",request.wsl[0].password));
+    held.write_all(format!("CONNECT 198.18.0.10:43210 HTTP/1.1\r\nHost: 198.18.0.10:43210\r\nProxy-Authorization: Basic {auth}\r\n\r\n").as_bytes()).unwrap();
+    held.set_read_timeout(Some(Duration::from_secs(3))).unwrap();let mut byte=[0];let mut header=vec![];while !header.ends_with(b"\r\n\r\n"){held.read_exact(&mut byte).unwrap();header.push(byte[0]);}
+    let client=reqwest::Client::builder().no_proxy().build().unwrap();
+    let deadline=tokio::time::Instant::now()+Duration::from_secs(3);
+    let evidence=loop {
+        let value:serde_json::Value=client.get(format!("http://127.0.0.1:{}/connections",request.controller_port)).bearer_auth(&request.controller_secret).send().await.unwrap().json().await.unwrap();
+        let evidence=super::runtime::connections(&value,&Settings::default(),&[],&request.wsl);
+        if !evidence.is_empty(){break evidence;}
+        assert!(tokio::time::Instant::now()<deadline,"core did not register accepted CONNECT: {value}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert_eq!(evidence.len(),1);assert_eq!(evidence[0].app,"Codex (WSL)");assert_eq!(evidence[0].proxy_id,ID);
+    drop(held);
+    let script=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("scripts/check-wsl-proxy-interop.py");
+    let output=Command::new("wsl.exe").args(["-d","Ubuntu","--exec","wslpath","-u"]).arg(script).output().unwrap();assert!(output.status.success());
+    let script=String::from_utf8(output.stdout).unwrap().trim().to_owned();
+    let apps=request.wsl.iter().map(|i|(i.app.clone(),serde_json::json!({"port":i.port,"password":i.password}))).collect::<serde_json::Map<_,_>>();
+    let mut payload=serde_json::json!({"enabled":true,"windowsExe":host.to_string_lossy(),"apps":apps});
+    for dead in [false,true] {
+        if dead {core.0.kill().unwrap();core.0.wait().unwrap();payload["expectBlocked"]=true.into();}
+        let mut probe=Command::new("wsl.exe").args(["-d","Ubuntu","--exec","python3",&script]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        probe.stdin.take().unwrap().write_all(&serde_json::to_vec(&payload).unwrap()).unwrap();
+        let output=probe.wait_with_output().unwrap();
+        assert!(output.status.success(),"WSL interop (dead={dead}) failed: {} {}",String::from_utf8_lossy(&output.stdout),String::from_utf8_lossy(&output.stderr));
+        assert_eq!(first.hits.load(Ordering::Acquire),1,"Codex missed its node or retried after failure");assert_eq!(second.hits.load(Ordering::Acquire),1,"Claude missed its node or retried after failure");
+    }
+    println!("Two assigned nodes, rejected missing auth, real Windows/WSL bridge, diagnostics and core-death isolation verified");
+}
 use super::test_fixture::Fixture;
 #[tokio::test]
 async fn synthetic_socks_fixture_carries_a_complete_request_without_tun() {
@@ -40,6 +100,7 @@ async fn synthetic_socks_fixture_carries_a_complete_request_without_tun() {
 fn request(paths: &[(String, String)], port: u16) -> ipc::StartRequest {
     ipc::StartRequest {
         stop_only: false,
+        wsl: vec![],
         session: uuid::Uuid::new_v4().to_string(),
         controller_port: TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -354,8 +415,9 @@ async fn native_cli_discovery_resolves_assigned_nodes_and_routes_tcp_udp(){
     let base=root.path().join("probe.exe");
     assert!(Command::new("rustc").arg(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/application_proxy_probe.rs")).args(["--edition=2021","-o"]).arg(&base).status().unwrap().success());
     let claude=home.join(".local/bin/claude.exe");
+    let extension=home.join(".vscode/extensions/anthropic.claude-code-2.1.322-win32-x64/resources/native-binary/claude.exe");
     let codex=npm.join("node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe");
-    for path in [&claude,&codex]{std::fs::create_dir_all(path.parent().unwrap()).unwrap();std::fs::copy(&base,path).unwrap();}
+    for path in [&claude,&codex,&extension]{std::fs::create_dir_all(path.parent().unwrap()).unwrap();std::fs::copy(&base,path).unwrap();}
     let pnpm=root.path().join("pnpm-global");
     let wrapper=root.path().join(".pnpm/codex-version/node_modules/@openai/codex");
     std::fs::create_dir_all(&wrapper).unwrap();
@@ -372,17 +434,17 @@ async fn native_cli_discovery_resolves_assigned_nodes_and_routes_tcp_udp(){
     let fixture=Fixture::start();let mut req=request(&[],fixture.port);req.rules=rules;
     let (mut pipe,helper,luid)=begin(&req).await;
     let interface=super::config::interface_name(&req.session).unwrap();
-    for path in [&claude,&codex,&pnpm_codex]{for mode in ["tcp","udp"]{
+    for path in [&claude,&codex,&pnpm_codex,&extension]{for mode in ["tcp","udp"]{
         let output=Command::new(path).arg(mode).output().unwrap();
         assert!(output.status.success(),"{} {mode} missed assigned proxy: {output:?}",path.display());
     }}
-    assert_eq!(fixture.hits.load(Ordering::Acquire),6);
+    assert_eq!(fixture.hits.load(Ordering::Acquire),8);
     let unrelated=root.path().join("node.exe");std::fs::copy(&base,&unrelated).unwrap();
     assert!(!Command::new(unrelated).arg("tcp").output().unwrap().status.success());
-    assert_eq!(fixture.hits.load(Ordering::Acquire),6,"shared Node runtime was proxied");
+    assert_eq!(fixture.hits.load(Ordering::Acquire),8,"shared Node runtime was proxied");
     stop_confirmed(&mut pipe,&helper).await;drop(pipe);exited(helper,&interface,luid).await;
     assert!(!protection::active().unwrap());
-    println!("Claude Code native + npm Codex CLI: discovered, resolved, TCP/UDP assigned node verified; unrelated Node excluded");
+    println!("Claude Code native + VS Code extension + npm Codex CLI: discovered, resolved, TCP/UDP assigned node verified; unrelated Node excluded");
 }
 
 #[tokio::test(flavor="multi_thread",worker_threads=2)]

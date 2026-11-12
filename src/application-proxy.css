@@ -13,3 +13,8 @@
 .ap-first-hop-fields{display:grid;grid-template-columns:110px minmax(0,1fr);gap:12px}
 .ap-first-hop-fields :disabled{opacity:.6}
 @media(max-width:480px){.ap-first-hop-fields{grid-template-columns:1fr}}
+.ap-wsl-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1.25rem 1.5rem}
+.ap-wsl-row+.ap-wsl-row{border-top:1px solid var(--border)}
+.ap-wsl-row p{margin:.4rem 0 0;color:var(--muted);font-size:.875rem}
+.ap-wsl-row button{flex-shrink:0}
+@media(max-width:640px){.ap-wsl-row{align-items:flex-start;flex-direction:column}}

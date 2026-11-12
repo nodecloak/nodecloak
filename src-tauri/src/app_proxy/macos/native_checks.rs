@@ -107,6 +107,7 @@ impl Drop for Session {
 fn request(paths: &[(String, String)], port: u16) -> StartRequest {
     StartRequest {
         stop_only: false,
+        wsl: vec![],
         session: uuid::Uuid::new_v4().to_string(),
         controller_port: std::net::TcpListener::bind("127.0.0.1:0")
             .unwrap()

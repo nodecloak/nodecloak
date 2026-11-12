@@ -1746,5 +1746,13 @@
   "已阻止直连": "Direct connections blocked",
   "代理不可用，指定应用已阻止直连。重新连接代理或手动停止后恢复普通网络。": "Proxy unavailable. Direct connections are blocked for assigned apps. Restore the proxy or explicitly stop application proxy to return to normal networking.",
   "断线保护：代理故障时阻止指定应用直连；无法识别所属程序的连接也会阻断。主动停止应用代理后恢复普通网络。": "Connection protection: assigned apps cannot connect directly if the proxy fails. Connections whose owning program cannot be identified are also blocked. Explicitly stop application proxy to restore normal networking.",
-  "Claude Code 使用 Claude 的节点；Codex CLI 使用 Codex 的节点。支持原生 CLI 和 npm 附带的原生程序。": "Claude Code uses the Claude node; Codex CLI uses the Codex node. Native CLIs and native executables bundled with npm are supported."
+  "Claude Code 使用 Claude 的节点；Codex CLI 使用 Codex 的节点。支持原生 CLI 和 npm 附带的原生程序。": "Claude Code uses the Claude node; Codex CLI uses the Codex node. Native CLIs and native executables bundled with npm are supported.",
+  "Claude Code CLI 和 VS Code Claude 扩展使用 Claude 的节点；Codex CLI 使用 Codex 的节点。": "Claude Code CLI and the VS Code Claude extension use the Claude node; Codex CLI uses the Codex node.",
+  "接入后，WSL 中的 Codex、Claude 和 VS Code Claude 扩展使用对应应用的节点。": "Once connected, Codex, Claude and the VS Code Claude extension in WSL use their corresponding application nodes.",
+  "已接入；重新打开终端和 Claude 扩展会话后生效。": "Connected. Reopen your terminal and Claude extension sessions to apply.",
+  "尚未接入；需要 Python 3、iproute2、util-linux，并支持用户网络隔离。": "Not connected. Requires Python 3, iproute2, util-linux and support for user network namespaces.",
+  "受保护会话无法绕过代理访问外网。代理故障时保持断网；主动停止应用代理后，新会话恢复普通网络。现有隔离会话需要重新打开。": "Protected sessions cannot reach the internet directly. They remain disconnected if the proxy fails. Explicitly stopping application proxy restores normal networking for new sessions; reopen existing isolated sessions.",
+  "移除 {0} 接入": "Disconnect {0}",
+  "接入 {0}": "Connect {0}",
+  "WSL 已接入": "WSL connected"
 }

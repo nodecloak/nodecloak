@@ -18,7 +18,17 @@ SOCKS5 节点带认证时填写 socks5://用户名:密码@服务器:端口。密
 
 Windows 的 Claude Code 原生 CLI（`~/.local/bin/claude.exe`）与 Claude 桌面端共用「Claude」的节点。Codex CLI 是 OpenAI 的编码命令行工具，使用「Codex」一栏的节点，不使用「ChatGPT」桌面端的节点；支持原生 CLI 及 npm 包内置的 Windows 原生 `codex.exe`（包括嵌套平台包和旧 vendor 布局）。即使 CLI 尚未运行，也会检查常见安装位置。保存节点后重新开启应用代理，再在 CLI 中重新连接。
 
-只由共享 `node.exe` 执行 JavaScript 的旧版 CLI 不会自动套用这些规则，以免影响所有 Node.js 程序。需要使用原生 CLI，或在 npm 中使用附带原生程序的版本。WSL 内的 Linux CLI 不属于 Windows 可执行文件规则；macOS 的 CLI 识别本次未扩展。
+Windows 本地 VS Code 和 VS Code Insiders 的 Claude Code 扩展也使用「Claude」节点。NodeCloak 识别扩展自带的原生 `claude.exe`，不会把整个 `Code.exe` 或其他扩展都设为代理。扩展或 CLI 更新后先停止应用代理，再重新识别并开启，让新路径同时加入分流和断网保护。
+
+只由共享 `node.exe` 执行 JavaScript 的旧版 Windows CLI 不会自动套用这些规则，以免影响所有 Node.js 程序。需要使用原生 CLI，或在 npm 中使用附带原生程序的版本。macOS 的 CLI 识别本次未扩展。
+
+Windows 的「应用代理」页面提供 WSL 接入。点击 Ubuntu 旁的「接入」，重新打开 WSL 终端及 VS Code Claude 会话后，使用普通 `codex`、`claude` 命令；Claude 扩展使用自动配置的进程启动器。它们分别沿用「Codex」「Claude」的节点，也沿用节点的前置代理设置，无需另外粘贴节点。现有 VS Code 自定义启动器、设置中的其他字段和注释会保留，移除接入时恢复原设置。只有已接入发行版的默认普通用户受到这些启动器覆盖。
+
+WSL 接入需要 Python 3、iproute2、util-linux，以及可用的非特权用户、网络和挂载命名空间；先检查能力，不能隔离时不会退回普通网络。Ubuntu 已验证。不支持以 root 用户接入；受系统策略限制的发行版会显示具体错误。接入会在用户目录安装启动器，并修改该用户的 shell PATH 和 VS Code 远程用户设置，不更改发行版的路由、DNS 或防火墙。未接入的发行版、通过原程序绝对路径启动的旧会话及 root 会话不属于接入范围。
+
+经启动器启动的 WSL 受保护会话只有独立的回环网络，请求通过认证的本地桥接送往对应节点。忽略代理变量的外部 IPv4、IPv6 和 UDP 请求会失败；代理节点、内核、桥接或 NodeCloak 异常退出也不会产生直连路由。Windows 程序互操作入口在该会话中禁用，避免从 Windows 子程序联网。主动停止应用代理后，新会话恢复普通网络；已经处于隔离中的会话需要关闭并重新打开。异常退出后重新打开 NodeCloak，可通过「停止应用代理」恢复新会话的普通网络。
+
+隔离也会阻止任意宿主机 TCP 回环服务。Claude 扩展通过明确指定的本地编辑器端口保持 VS Code 联动；其他本地 TCP 服务和需要 Windows 子程序的工具可能不可用。这是应用请求的网络出口保护，不是面向恶意程序的完整系统沙箱；用户主动修改启动器、代理配置或借助外部 IPC 服务代发的请求不属于保证范围。
 
 macOS 选择 `.app` 时会包括包内的主程序及实际可执行的子程序，网络请求由应用自带 Helper 发出时也能匹配。应用更新、移动或更名后，先停止应用代理，再点击「重新识别」；手动选择的应用需要重新选择。共享的系统进程、浏览器或应用包之外的程序不属于该规则。自动识别会核对产品身份，不能仅靠把另一个程序改名为 Codex 或 Claude 来匹配。
 

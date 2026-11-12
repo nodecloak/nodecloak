@@ -11,6 +11,8 @@ pub unsafe fn sanitize_appimage_environment_before_startup() {
     unsafe { appimage::sanitize_before_startup(); }
 }
 mod app_proxy;
+#[cfg(windows)]
+pub fn run_wsl_proxy_relay(port:u16)->Result<(),String>{app_proxy::wsl::relay(port)}
 pub fn run_app_proxy_helper(suffix:&str,parent:u32)->Result<(),String>{
     #[cfg(any(windows,target_os="macos"))] {tauri::async_runtime::block_on(app_proxy::helper::run(suffix,parent))}
     #[cfg(not(any(windows,target_os="macos")))] {let _=(suffix,parent);Err("应用代理支持 Windows 和 macOS".into())}

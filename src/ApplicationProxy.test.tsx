@@ -15,6 +15,25 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.resetAllMocks();});
 const button=(text:string)=>Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent?.includes(text));
+it('connects a WSL distribution explicitly using the existing application nodes',async()=>{
+ view.platform='windows';view.wsl=[{name:'Ubuntu',installed:false}];
+ await act(async()=>root.render(<ApplicationProxy/>));
+ expect(host.textContent).toContain('WSL');expect(host.textContent).toContain('Codex、Claude');
+ await act(async()=>button('接入 Ubuntu')!.click());
+ expect(api.call.mock.calls.some(([action,payload])=>action==='installWsl'&&payload.name==='Ubuntu')).toBe(true);
+ expect(api.call.mock.calls.some(([action])=>action==='start')).toBe(false);
+});
+it('locks WSL removal while proxy protection is active',async()=>{
+ view.platform='windows';view.wsl=[{name:'Ubuntu',installed:true}];view.runtime.phase='running';
+ await act(async()=>root.render(<ApplicationProxy/>));
+ expect(button('移除 Ubuntu 接入')!.disabled).toBe(true);
+});
+it('removes an inactive WSL integration without changing the application nodes',async()=>{
+ view.platform='windows';view.wsl=[{name:'Ubuntu',installed:true}];
+ await act(async()=>root.render(<ApplicationProxy/>));await act(async()=>button('移除 Ubuntu 接入')!.click());
+ expect(api.call.mock.calls.some(([action,payload])=>action==='removeWsl'&&payload.name==='Ubuntu')).toBe(true);
+ expect(api.call.mock.calls.some(([action])=>action==='saveRules')).toBe(false);
+});
 it('keeps Stop available after a crash with persistent direct-connection protection',async()=>{
  Object.assign(view.runtime,{phase:'error',protectionActive:true,error:'代理内核意外退出'});
  await act(async()=>root.render(<ApplicationProxy/>));

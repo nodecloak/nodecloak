@@ -31,7 +31,7 @@ sha2 = "0.10"
 base64 = "0.22"
 flate2 = "1.1"
 uuid = { version = "1", features = ["v4"] }
-tokio = { version = "1", features = ["net", "io-util", "io-std", "sync", "time", "macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1", features = ["net", "process", "io-util", "io-std", "sync", "time", "macros", "rt", "rt-multi-thread"] }
 rmcp = { version = "=3.5.1", default-features = false, features = ["server", "transport-io"] }
 tokio-native-tls = "0.3"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }

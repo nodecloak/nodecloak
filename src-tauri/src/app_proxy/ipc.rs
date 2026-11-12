@@ -13,6 +13,8 @@ pub struct Hello {
 pub struct StartRequest {
     #[serde(default)]
     pub stop_only: bool,
+    #[serde(default)]
+    pub wsl: Vec<super::wsl::Ingress>,
     pub session: String,
     pub controller_port: u16,
     pub controller_secret: String,

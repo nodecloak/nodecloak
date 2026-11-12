@@ -40,12 +40,13 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
     if request.stop_only {return Err("当前系统不支持持久断网保护恢复".into());}
     // Validate before any privileged filesystem or network operation.
     let validation = (|| {
-        let core_config = config::compile(
+        let core_config = config::compile_for_wsl(config::Platform::current(),
             &request.rules,
             &request.proxies,
             request.controller_port,
             &request.controller_secret,
             &request.session,
+            &request.wsl,
         )?;
         let interface = config::interface_name(&request.session)?;
         let ownership = process::ownership_mutex()?;
@@ -86,7 +87,7 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
     let _reader = Reader(control);
     let worker_cancel = cancel.clone();
     #[cfg(windows)]
-    super::windows::protection::replace(&request.rules,0)?;
+    if !request.rules.is_empty(){super::windows::protection::replace(&request.rules,0)?;}
     #[cfg(target_os = "macos")]
     let original_network = network::signature()?;
     let worker_interface = interface.clone();
@@ -97,10 +98,11 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
         .filter(|p| !p.is_empty())
         .collect();
     secrets.push(request.controller_secret.clone());
+    secrets.extend(request.wsl.iter().map(|i|i.password.clone()));
     let start = tokio::task::spawn_blocking(move || {
         let files = PrivateCore::prepare(&worker_cancel)?;
         network::preflight(&network::snapshot()?, &worker_interface)?;
-        core_config["route"]["rules"][0]["process_path_regex"]
+        core_config["route"]["rules"].as_array_mut().ok_or("应用代理路由无效")?.iter_mut().find(|v|v["outbound"]=="direct"&&v.get("process_path_regex").is_some()).ok_or("应用代理控制程序路由缺失")?["process_path_regex"]
             .as_array_mut()
             .ok_or("应用代理配置无效")?
             .push(serde_json::json!(config::path_pattern(
@@ -143,7 +145,7 @@ async fn run_inner(suffix: &str, parent: u32) -> Result<(), String> {
                             .is_ok_and(|r| r.status().is_success())
                     {
                         #[cfg(windows)]
-                        super::windows::protection::replace(&request.rules,luid.unwrap())?;
+                        if !request.rules.is_empty(){super::windows::protection::replace(&request.rules,luid.unwrap())?;}
                         ipc::write_frame(
                             &mut output,
                             &Reply::Ready {

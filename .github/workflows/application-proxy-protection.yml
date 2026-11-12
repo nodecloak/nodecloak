@@ -1,11 +1,17 @@
 name: Application proxy fail-closed checks
 on:
   push:
-    branches: [codex/application-proxy-fail-closed, codex/application-proxy-cli]
+    branches: [codex/application-proxy-fail-closed, codex/application-proxy-cli, codex/application-proxy-wsl]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
+  wsl-agent:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/test-wsl-application-proxy.py
   windows:
     runs-on: windows-latest
     timeout-minutes: 40

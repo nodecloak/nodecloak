@@ -1,6 +1,13 @@
 //! Discover native CLI executables, never a shared Node/Python/shell runtime.
 pub(super) fn identify_windows(path: &str) -> Option<&'static str> {
     let path = super::discovery::normalize(path);
+    for channel in [r"\.vscode\extensions\", r"\.vscode-insiders\extensions\"] {
+        if let Some((_,tail))=path.rsplit_once(channel) {
+            if let Some((package,suffix))=tail.split_once('\\') {
+                if suffix==r"resources\native-binary\claude.exe" && vscode_package(package) {return Some("claude");}
+            }
+        }
+    }
     for (name, id) in [("claude.exe", "claude"), ("codex.exe", "codex")] {
         if path.ends_with(&format!(r"\.local\bin\{name}")) {
             return Some(id);
@@ -22,6 +29,11 @@ pub(super) fn identify_windows(path: &str) -> Option<&'static str> {
     None
 }
 
+fn vscode_package(package:&str)->bool {
+    let Some(version)=package.strip_prefix("anthropic.claude-code-").and_then(|s|s.strip_suffix("-win32-x64").or_else(||s.strip_suffix("-win32-arm64"))) else{return false;};
+    version.split('.').count()==3 && version.split('.').all(|part|!part.is_empty()&&part.bytes().all(|b|b.is_ascii_digit()))
+}
+
 #[cfg(windows)]
 pub(super) fn discover_in(
     apps: &mut [super::discovery::DetectedApp],
@@ -33,6 +45,15 @@ pub(super) fn discover_in(
         ("claude", home.join(".local/bin/claude.exe")),
         ("codex", home.join(".local/bin/codex.exe")),
     ];
+    for channel in [".vscode", ".vscode-insiders"] {
+        if let Ok(entries)=std::fs::read_dir(home.join(channel).join("extensions")) {
+            for entry in entries.take(512).flatten() {
+                if vscode_package(&entry.file_name().to_string_lossy().to_lowercase()) {
+                    candidates.push(("claude",entry.path().join("resources/native-binary/claude.exe")));
+                }
+            }
+        }
+    }
     let mut roots: Vec<PathBuf> = vec![home.join(".npm-global"), home.join(".bun/install/global")];
     roots.extend(shim_roots.iter().take(126).cloned());
     let mut seen = BTreeSet::new();
@@ -89,6 +110,18 @@ pub(super) fn discover_in(
 
 #[cfg(all(test, windows))]
 mod tests {
+    #[test]
+    fn idle_vscode_extension_binary_is_discovered_in_both_channels() {
+        let temp=tempfile::tempdir().unwrap();
+        let mut expected=vec![];
+        for channel in [".vscode", ".vscode-insiders"] {
+            let file=temp.path().join(format!("{channel}/extensions/anthropic.claude-code-2.1.322-win32-x64/resources/native-binary/claude.exe"));
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();std::fs::write(&file,b"fixture").unwrap();expected.push(file.canonicalize().unwrap());
+        }
+        let mut apps=super::super::discovery::empty_apps();super::discover_in(&mut apps,temp.path(),&[]);
+        let paths=&apps.iter().find(|a|a.id=="claude").unwrap().paths;
+        for file in expected {assert!(paths.iter().any(|p|std::path::Path::new(p).canonicalize().unwrap()==file));}
+    }
     #[test]
     fn idle_native_clis_are_discovered_without_launching_commands() {
         let temp = tempfile::tempdir().unwrap();

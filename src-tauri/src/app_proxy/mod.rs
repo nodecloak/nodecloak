@@ -2,6 +2,7 @@
 mod checks;
 pub(crate) mod commands;
 mod cli;
+pub(crate) mod wsl;
 mod config;
 mod discovery;
 pub(crate) mod helper;

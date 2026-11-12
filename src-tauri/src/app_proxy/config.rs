@@ -215,7 +215,10 @@ pub fn compile_for(
     secret: &str,
     session: &str,
 ) -> Result<Value, String> {
-    if rules.is_empty()
+    compile_for_wsl(platform,rules,proxies,port,secret,session,&[])
+}
+pub fn compile_for_wsl(platform:Platform,rules:&[ResolvedRule],proxies:&[ResolvedProxy],port:u16,secret:&str,session:&str,wsl:&[super::wsl::Ingress])->Result<Value,String>{
+    if (rules.is_empty()&&wsl.is_empty())
         || rules.len() > 64
         || proxies.is_empty()
         || proxies.len() > 32
@@ -331,10 +334,13 @@ pub fn compile_for(
     if platform==Platform::Windows {
         routing.push(json!({"process_path_regex":["."],"invert":true,"action":"reject"}));
     }
-    Ok(json!({"log":{"level":"info","timestamp":false},
+    let mut result=json!({"log":{"level":"info","timestamp":false},
         "dns":{"servers":[{"type":"local","tag":"bootstrap"}]},
         "inbounds":[{"type":"tun","tag":"applications","interface_name":interface_name_for(platform,session)?,"address":["172.29.255.1/30","fd64:6e6f:6465::1/126"],"mtu":1500,"auto_route":true,"strict_route":false,"dns_mode":"disabled","stack":"mixed"}],
         "outbounds":outbounds,"route":{"auto_detect_interface":true,"find_process":true,"default_domain_resolver":"bootstrap","rules":routing,"final":"direct"},
         "experimental":{"clash_api":{"external_controller":format!("127.0.0.1:{port}"),"secret":secret,"access_control_allow_origin":["http://nodecloak.invalid"],"access_control_allow_private_network":false}}
-    }))
+    });
+    if platform!=Platform::Windows&&!wsl.is_empty(){return Err("WSL 接入仅支持 Windows".into());}
+    super::wsl::add_ingresses(&mut result,wsl,port)?;
+    Ok(result)
 }

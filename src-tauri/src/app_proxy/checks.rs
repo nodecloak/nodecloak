@@ -16,6 +16,18 @@ use serde_json::json;
 
 const ID: &str = "0b4fcb93-ec83-4f9b-996a-f89f7aa96025";
 #[test]
+fn vscode_claude_native_extension_is_selected_without_proxying_code_or_node() {
+    for root in [r"C:\Users\James\.vscode", r"D:\Home\.vscode-insiders"] {
+        for arch in ["win32-x64", "win32-arm64"] {
+            let path=format!(r"{root}\extensions\anthropic.claude-code-2.1.322-{arch}\resources\native-binary\claude.exe");
+            assert_eq!(discovery::identify(&path),Some("claude"));
+        }
+    }
+    for path in [r"C:\Users\x\.vscode\extensions\other.claude-code-1\resources\native-binary\claude.exe",r"C:\Users\x\.vscode\extensions\anthropic.claude-code-not-a-version\resources\native-binary\claude.exe",r"C:\Apps\Code.exe",r"C:\Apps\node.exe"] {
+        assert_eq!(discovery::identify(path),None,"{path}");
+    }
+}
+#[test]
 fn mac_interface_units_never_exceed_the_darwin_unit_range() {
     for value in [0u16, 31743, 32767, 32768, 64511, u16::MAX] {
         let mut bytes = [0u8; 16];

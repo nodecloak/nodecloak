@@ -92,6 +92,8 @@ impl Default for Status {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct View {
+    #[cfg(windows)]
+    pub wsl: Vec<super::wsl::Distribution>,
     pub supported: bool,
     pub platform: &'static str,
     pub settings: Settings,
@@ -100,6 +102,8 @@ pub struct View {
     pub runtime: Status,
 }
 pub struct Runtime {
+    #[cfg(windows)]
+    wsl: Mutex<Vec<super::wsl::Distribution>>,
     pub gate: AsyncMutex<()>,
     pub state: Arc<Mutex<Status>>,
     pub apps: Mutex<(bool, Vec<DetectedApp>)>,
@@ -111,6 +115,8 @@ pub struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
+            #[cfg(windows)]
+            wsl: Mutex::new(vec![]),
             gate: AsyncMutex::new(()),
             state: Arc::new(Mutex::new(Status::default())),
             apps: Mutex::new((false, discovery::empty_apps())),
@@ -143,7 +149,7 @@ impl Runtime {
         #[cfg(windows)]
         {
             let mut status=self.state.lock().map_err(|_|"应用代理状态不可用")?;
-            status.protection_active=super::windows::protection::active()?;
+            status.protection_active=super::windows::protection::active()?||super::wsl::protected(root)?;
             if super::windows::protection::pending()? && status.phase!="running" && status.phase!="starting" {
                 status.needs_cleanup=true;
                 status.phase="error".into();
@@ -170,6 +176,8 @@ impl Runtime {
         }
         let apps = self.apps.lock().map_err(|_| "应用识别状态不可用")?;
         Ok(View {
+            #[cfg(windows)]
+            wsl: self.wsl.lock().map_err(|_|"WSL 接入状态不可用")?.clone(),
             supported: cfg!(any(windows, target_os = "macos")),
             platform: if cfg!(target_os = "macos") {
                 "macos"
@@ -184,9 +192,9 @@ impl Runtime {
             runtime: self.state.lock().map_err(|_| "应用代理状态不可用")?.clone(),
         })
     }
-    pub fn editable(&self) -> Result<(), String> {
+    pub fn editable(&self, _root:&Path) -> Result<(), String> {
         #[cfg(windows)]
-        if super::windows::protection::needs_recovery()? {
+        if super::windows::protection::needs_recovery()? || super::wsl::protected(_root)? {
             return Err("请先停止应用代理并解除断网保护，再修改规则或节点".into());
         }
         let status = self.state.lock().map_err(|_| "应用代理状态不可用")?;
@@ -201,7 +209,13 @@ impl Runtime {
     fn event(&self, root: &Path, event: &str, message: &str) {
         record(&self.state, root, event, message);
     }
-    pub async fn discover(&self) -> Result<(), String> {
+    pub async fn discover(&self, _root:&Path) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let root=_root.to_owned();
+            let entries=tokio::task::spawn_blocking(move||super::wsl::discover(&root)).await.map_err(|_|"WSL 识别中断")??;
+            *self.wsl.lock().map_err(|_|"WSL 接入状态不可用")?=entries;
+        }
         let apps = tokio::task::spawn_blocking(discovery::discover)
             .await
             .map_err(|_| "应用识别任务中断")??;
@@ -217,7 +231,7 @@ impl Runtime {
         #[cfg(any(windows, target_os = "macos"))]
         {
             let _gate = self.gate.lock().await;
-            self.editable()?;
+            self.editable(root)?;
             let stale = self.active.lock().await.take();
             if let Some(mut stale) = stale {
                 if let Err(error) = stale.close().await {
@@ -236,12 +250,18 @@ impl Runtime {
                 .1
                 .clone();
             let settings_copy = settings.clone();
+            #[cfg(windows)]
+            let wsl=super::wsl::prepare(root,&settings).await?;
+            #[cfg(not(windows))]
+            let wsl:Vec<super::wsl::Ingress>=vec![];
+            if self.cancel.load(Ordering::Acquire){return Err("应用代理启动已取消".into());}
+            let wsl_copy=wsl.clone();
             let (rules, warnings) =
-                prepare(self.cancel.clone(), move || resolve(&settings_copy, &apps)).await?;
+                prepare(self.cancel.clone(), move || resolve_with_wsl(&settings_copy, &apps,&wsl_copy)).await?;
             let mut filtered = settings.clone();
             filtered
                 .rules
-                .retain(|r| rules.iter().any(|rule| rule.id == r.id));
+                .retain(|r| rules.iter().any(|rule| rule.id == r.id)||wsl.iter().any(|i|i.app==r.app&&r.executable.is_empty()&&r.enabled));
             let proxies =
                 super::store::resolved_proxies(&filtered, &super::store::NativeCredentials)?;
             let reserved = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -258,7 +278,7 @@ impl Runtime {
                 uuid::Uuid::new_v4().simple(),
                 uuid::Uuid::new_v4().simple()
             );
-            super::config::compile(&rules, &proxies, port, &secret, &session)?;
+            super::config::compile_for_wsl(super::config::Platform::current(),&rules, &proxies, port, &secret, &session,&wsl)?;
             let interface = super::config::interface_name(&session)?;
             super::driver::network::preflight(&super::driver::network::snapshot()?, &interface)?;
             {
@@ -280,6 +300,7 @@ impl Runtime {
                 },
             );
             let request = super::ipc::StartRequest {
+                wsl,
             stop_only: false,
                 session: session.clone(),
                 controller_port: port,
@@ -326,7 +347,7 @@ impl Runtime {
         self.cancel.store(true, Ordering::Release);
         let _gate = self.gate.lock().await;
         #[cfg(windows)]
-        let protected=super::windows::protection::needs_recovery()?;
+        let protected=super::windows::protection::needs_recovery()?||super::wsl::protected(root)?;
         #[cfg(not(windows))]
         let protected=false;
         if !protected && self
@@ -371,6 +392,11 @@ impl Runtime {
                 self.event(root,"protection_release_failed",&error);
                 return Err(error);
             }
+        }
+        #[cfg(windows)]
+        if let Err(error)=super::wsl::stop(root).await {
+            if let Ok(mut state)=self.state.lock(){state.phase="error".into();state.error=Some(error.clone());state.needs_cleanup=true;}
+            self.event(root,"wsl_stop_failed",&error);return Err(error);
         }
         if let Ok(mut state) = self.state.lock() {
             state.phase = "off".into();
@@ -424,7 +450,7 @@ fn record(state: &Arc<Mutex<Status>>, root: &Path, event: &str, message: &str) {
 pub(super) async fn clear_protection()->Result<(),String>{
     use super::ipc::{self,StartRequest,Reply};
     let (mut pipe,helper)=super::windows::transport::connect_helper().await?;
-    let request=StartRequest{stop_only:true,session:uuid::Uuid::new_v4().to_string(),controller_port:0,controller_secret:String::new(),rules:vec![],proxies:vec![]};
+    let request=StartRequest{stop_only:true,wsl:vec![],session:uuid::Uuid::new_v4().to_string(),controller_port:0,controller_secret:String::new(),rules:vec![],proxies:vec![]};
     ipc::write_frame(&mut pipe,&request).await?;
     let reply:Reply=tokio::time::timeout(Duration::from_secs(15),ipc::read_frame(&mut pipe)).await.map_err(|_|"解除断网保护超时，保护仍保留")??;
     match reply{Reply::Stopped=>{},Reply::Failure{message}=>return Err(message),_=>return Err("解除断网保护响应无效".into())}
@@ -437,6 +463,9 @@ pub(super) fn resolve(
     settings: &Settings,
     apps: &[DetectedApp],
 ) -> Result<(Vec<ResolvedRule>, Vec<String>), String> {
+    resolve_with_wsl(settings,apps,&[])
+}
+fn resolve_with_wsl(settings:&Settings,apps:&[DetectedApp],wsl:&[super::wsl::Ingress])->Result<(Vec<ResolvedRule>, Vec<String>), String> {
     let mut rules = vec![];
     let mut warnings = vec![];
     for rule in settings.rules.iter().filter(|r| r.enabled) {
@@ -464,6 +493,7 @@ pub(super) fn resolve(
             .map(|p| discovery::canonical_executable(&p))
             .collect();
         if paths.is_empty() {
+            if wsl.iter().any(|i|i.app==rule.app&&rule.executable.is_empty()){continue;}
             warnings.push(format!("未找到 {name} 的程序文件，本次不启用该规则"));
             continue;
         }
@@ -476,7 +506,7 @@ pub(super) fn resolve(
             exact_paths: rule.app == "custom" || !rule.executable.is_empty(),
         });
     }
-    if rules.is_empty() {
+    if rules.is_empty()&&wsl.is_empty() {
         return Err("请至少为一个已安装应用选择代理节点".into());
     }
     warnings.push("开启后新建立的连接按规则分流；已有连接请通过应用自身重新连接。".into());
@@ -631,7 +661,7 @@ impl Session {
                         }
                         if complete {
                             if let Ok(value) = serde_json::from_slice(&bytes) {
-                                let connections = connections(&value, &settings, &rules);
+                                let connections = connections(&value, &settings, &rules, &request.wsl);
                                 if let Ok(mut status) = state.lock() {
                                     if status.session.as_deref() == Some(&session)
                                         && status.phase == "running"
@@ -744,10 +774,11 @@ impl Drop for StartingSession {
     }
 }
 
-fn connections(
+pub(super) fn connections(
     value: &serde_json::Value,
     _settings: &Settings,
     rules: &[ResolvedRule],
+    wsl: &[super::wsl::Ingress],
 ) -> Vec<Connection> {
     let mut result = vec![];
     for row in value["connections"]
@@ -757,10 +788,8 @@ fn connections(
         .take(2000)
     {
         let metadata = &row["metadata"];
-        let Some(path) = metadata["processPath"].as_str().filter(|s| s.len() <= 2048) else {
-            continue;
-        };
-        let Some(rule) = rules.iter().find(|r| {
+        let path = metadata["processPath"].as_str().filter(|s| s.len() <= 2048).unwrap_or("");
+        let rule = rules.iter().find(|r| {
             row["chains"].as_array().is_some_and(|chains| {
                 chains
                     .iter()
@@ -773,9 +802,11 @@ fn connections(
                     super::config::path_pattern(known) == super::config::path_pattern(path)
                 }
             })
-        }) else {
-            continue;
-        };
+        });
+        let ingress=wsl.iter().find(|i|metadata["type"]==format!("http/{}",i.tag())&&row["chains"].as_array().is_some_and(|chains|chains.iter().any(|c|c==&format!("proxy-{}",i.proxy_id))));
+        let (app,process_path,proxy_id)=if let Some(i)=ingress {
+            (format!("{} (WSL)",if i.app=="codex"{"Codex"}else{"Claude"}),format!("WSL / {}",i.app),i.proxy_id.clone())
+        } else if let Some(rule)=rule {(rule.name.clone(),path.to_owned(),rule.proxy_id.clone())}else{continue;};
         let host = metadata["host"]
             .as_str()
             .filter(|s| !s.is_empty())
@@ -799,15 +830,15 @@ fn connections(
         }
         result.push(Connection {
             id: id.into(),
-            app: rule.name.clone(),
-            process_path: path.into(),
+            app,
+            process_path,
             destination: format!("{host}:{port}"),
             network: metadata["network"]
                 .as_str()
                 .filter(|s| ["tcp", "udp"].contains(s))
                 .unwrap_or("tcp")
                 .into(),
-            proxy_id: rule.proxy_id.clone(),
+            proxy_id,
             upload: row["upload"].as_u64().unwrap_or(0),
             download: row["download"].as_u64().unwrap_or(0),
             seen_at: chrono::Utc::now().to_rfc3339(),
@@ -827,7 +858,7 @@ mod checks {
     fn inactive_runtime_cannot_edit_rules_while_direct_connection_protection_remains(){
         let runtime=Runtime::default();
         runtime.state.lock().unwrap().protection_active=true;
-        assert!(runtime.editable().is_err());
+        assert!(runtime.editable(tempfile::tempdir().unwrap().path()).is_err());
     }
     #[test]
     fn restart_keeps_diagnostics_but_never_restores_a_running_session() {
@@ -902,7 +933,7 @@ mod checks {
             {"id":"direct","metadata":{"processPath":"C:\\Apps\\Codex.exe","host":"private.example","destinationPort":"443","network":"tcp"},"chains":["direct"]},
             {"id":"unrelated","metadata":{"processPath":"C:\\Apps\\Other.exe","host":"private.example","destinationPort":"443","network":"tcp"},"chains":[format!("proxy-{id}")]}
         ]});
-        let results = connections(&value, &Settings::default(), &rules);
+        let results = connections(&value, &Settings::default(), &rules, &[]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "matched");
         assert_eq!(results[0].app, "Codex");
