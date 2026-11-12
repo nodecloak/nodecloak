@@ -247,7 +247,10 @@ impl CoreProcess {
             FreeConsole();
             if AttachConsole(self.pid) != 0 {
                 SetConsoleCtrlHandler(Some(ignore), 1);
-                GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+                // Target the core's process group. Broadcasting to group 0
+                // also signals this attached privileged helper, which can exit
+                // before removing protection and acknowledging explicit Stop.
+                GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, self.pid);
                 FreeConsole();
             }
         }
