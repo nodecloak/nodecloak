@@ -418,7 +418,27 @@ impl Protocol {
                         || value["result"]["type"] == "exception"
                         || value["result"].get("exceptionDetails").is_some()
                     {
-                        return Err("浏览器区域匹配执行失败".into());
+                        let details = &value["result"]["exceptionDetails"];
+                        let detail = details["exception"]["description"]
+                            .as_str()
+                            .or_else(|| details["exception"]["value"].as_str())
+                            .or_else(|| details["text"].as_str())
+                            .or_else(|| value["result"]["exception"]["description"].as_str())
+                            .or_else(|| value["result"]["message"].as_str())
+                            .unwrap_or("");
+                        let detail = detail
+                            .lines()
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .chars()
+                            .take(240)
+                            .collect::<String>();
+                        return Err(if detail.is_empty() {
+                            "浏览器区域匹配执行失败".into()
+                        } else {
+                            format!("浏览器区域匹配执行失败（{detail}）")
+                        });
                     }
                     return Ok(value["result"].clone());
                 }
@@ -693,17 +713,23 @@ impl BrowserControl {
         }
         if match_ip {
             // Query inside the actual browser so PAC/TUN/extension routing is respected.
-            let expression=format!("fetch({},{{credentials:'omit',cache:'no-store',signal:AbortSignal.timeout(10000)}}).then(async r=>{{if(!r.ok)throw Error('region unavailable');const t=await r.text();if(t.length>65536)throw Error('region too large');return t}})",json!(lookup_url));
-            let result = if this.firefox {
-                this.protocol.call("script.evaluate",json!({"expression":expression,"target":{"context":this.primary},"awaitPromise":true}),None)?["result"]["value"].clone()
+            // Try the configured endpoint first, then a fallback with the same fields.
+            let urls = json!(regional::lookup_urls(lookup_url)).to_string();
+            let expression = r#"(async()=>{const urls=__URLS__;let last='';for(const url of urls){try{const r=await fetch(url,{credentials:'omit',cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error('status '+r.status);const t=await r.text();if(t.length>65536)throw Error('region too large');const v=JSON.parse(t);if(v.success!==true)throw Error('region rejected');const tz=v.timezone&&typeof v.timezone==='object'?v.timezone.id:v.timezone;return JSON.stringify({success:true,ip:v.ip,country_code:v.country_code,city:v.city,latitude:v.latitude,longitude:v.longitude,timezone:{id:tz}});}catch(e){last=String(e);}}throw Error('region lookup failed: '+last);})()"#
+                .replace("__URLS__", &urls);
+            let call = if this.firefox {
+                this.protocol.call("script.evaluate",json!({"expression":expression,"target":{"context":this.primary},"awaitPromise":true}),None)
             } else {
                 this.protocol.call(
                     "Runtime.evaluate",
                     json!({"expression":expression,"awaitPromise":true,"returnByValue":true}),
                     Some(&this.primary),
-                )?["result"]["value"]
-                    .clone()
+                )
             };
+            let result = call
+                .map_err(|error| format!("{error}；请检查代理是否允许访问区域查询服务，或改用自定义区域设置"))?
+                ["result"]["value"]
+                .clone();
             let data: Value = serde_json::from_str(
                 result
                     .as_str()

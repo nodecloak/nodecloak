@@ -192,7 +192,7 @@ fn launch_impl(
             .ok_or("Firefox 未提供原生配置上下文")?
             .to_owned();
         let ip = if crate::regional::uses_ip(p) {
-            Some(rdp.lookup(&console, lookup_url)?)
+            Some(rdp.lookup(&console, &crate::regional::lookup_urls(lookup_url))?)
         } else {
             None
         };
@@ -427,17 +427,21 @@ impl Rdp {
         }
         Err("Firefox 配置结果缺失".into())
     }
-    fn lookup(&mut self, actor: &str, url: &str) -> Result<crate::regional::IpRegion, String> {
+    fn lookup(
+        &mut self,
+        actor: &str,
+        urls: &[String],
+    ) -> Result<crate::regional::IpRegion, String> {
         let key = format!("nodecloak.region.{}", crate::fingerprint::seed()?);
         self.evaluate(
             actor,
             &format!(
                 "{SCRIPT};nodecloakQueryRegion({}, {})",
-                json!(url),
+                json!(urls),
                 json!(key)
             ),
         )?;
-        let deadline = Instant::now() + Duration::from_secs(12);
+        let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let response = self.evaluate(
                 actor,
@@ -460,10 +464,18 @@ impl Rdp {
                 return region;
             }
             if state["status"] == "failed" || Instant::now() >= deadline {
-                return Err(
+                let detail = state["error"]
+                    .as_str()
+                    .unwrap_or("")
+                    .chars()
+                    .take(240)
+                    .collect::<String>();
+                return Err(if detail.is_empty() {
                     "无法通过 Firefox 的网络路径匹配 IP 区域，请检查代理后重试；尚未打开目标网站"
-                        .into(),
-                );
+                        .into()
+                } else {
+                    format!("无法通过 Firefox 的网络路径匹配 IP 区域（{detail}），请检查代理后重试；尚未打开目标网站")
+                });
             }
             std::thread::sleep(Duration::from_millis(50));
         }
