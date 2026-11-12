@@ -186,4 +186,4 @@ node scripts/build-desktop.mjs
 
 [NodeLoc — 自由、平等、友好、开放、有趣的交流社区](https://www.nodeloc.com/)
 
-[ForZTN Channel](https://sponsorship.forztn.com/github.com/nodecloak/nodecloak)
+[ForZTN](https://sponsorship.forztn.com/github.com/nodecloak/nodecloak)
