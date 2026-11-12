@@ -183,3 +183,5 @@ node scripts/build-desktop.mjs
 ## 友情链接
 
 [LINUX DO — 新的理想型社区](https://linux.do/)
+
+[NodeLoc — 自由、平等、友好、开放、有趣的交流社区](https://www.nodeloc.com/)
