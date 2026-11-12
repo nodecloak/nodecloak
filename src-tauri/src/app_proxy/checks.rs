@@ -292,6 +292,11 @@ fn app_tun_routes_only_assigned_paths_and_preserves_system_dns_and_browser_relay
     assert_eq!(v["dns"]["servers"][0]["type"], "local");
 }
 #[test]
+fn windows_unidentified_connections_never_fall_through_to_direct(){
+    let config=config::compile(&[rule(r"C:\Apps\Codex.exe")],&[proxy()],51234,&"a".repeat(64),ID).unwrap();
+    assert_eq!(config["route"]["rules"].as_array().unwrap().last().unwrap(),&json!({"process_path_regex":["."],"invert":true,"action":"reject"}));
+}
+#[test]
 fn no_rules_unsafe_paths_and_conflicting_assignments_cannot_start_routing() {
     let compile = |r: &[ResolvedRule]| config::compile(r, &[proxy()], 51234, &"a".repeat(64), ID);
     assert!(compile(&[]).is_err());

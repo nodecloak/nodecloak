@@ -31,6 +31,8 @@ jobs:
         run: |
           $env:NODECLOAK_TEST_APP_PROXY_HOST="$env:GITHUB_WORKSPACE/src-tauri/target/debug/nodecloak.exe"
           $env:NODECLOAK_TEST_SINGBOX="$env:GITHUB_WORKSPACE/.tools/singbox/win32-x64/sing-box.exe"
+          python scripts/check-application-proxy-unknown.py
+          if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_application_proxy_routes_tcp_udp_and_releases_only_owned_network -- --ignored --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) {exit $LASTEXITCODE}
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib native_persistent_application_guard_survives_helper_and_core_failure -- --ignored --nocapture --test-threads=1

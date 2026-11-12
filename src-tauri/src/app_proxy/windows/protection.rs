@@ -125,7 +125,18 @@ pub fn clear() -> Result<(), String> {
     marker(0)
 }
 pub fn replace(rules: &[ResolvedRule], allowed_luid: u64) -> Result<(), String> {
-    let paths: BTreeSet<_> = rules.iter().flat_map(|r| r.paths.iter()).collect();
+    // WFP app IDs preserve NTFS short-name spelling. Process authorization may
+    // use the long image path, even when CreateProcess received an 8.3 alias.
+    let paths: BTreeSet<String> = rules
+        .iter()
+        .flat_map(|r| r.paths.iter())
+        .flat_map(|p| {
+            [
+                p.clone(),
+                crate::app_proxy::discovery::canonical_executable(p),
+            ]
+        })
+        .collect();
     if paths.is_empty() {
         return Err("没有可保护的应用，已保留原有断网保护".into());
     }
@@ -151,7 +162,7 @@ pub fn replace(rules: &[ResolvedRule], allowed_luid: u64) -> Result<(), String> 
         } // FWP_E_ALREADY_EXISTS
         engine.delete()?;
         for path in paths {
-            let filename = wide(path);
+            let filename = wide(&path);
             let mut app = ptr::null_mut();
             check(unsafe { FwpmGetAppIdFromFileName0(filename.as_ptr(), &mut app) })?;
             let result: Result<(), String> = (|| {

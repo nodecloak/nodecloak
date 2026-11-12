@@ -325,6 +325,12 @@ pub fn compile_for(
         }
         routing.push(json!({"process_path_regex":paths,"action":"route","outbound":format!("proxy-{}",rule.proxy_id)}));
     }
+    // Missing process identity must not send a selected application's traffic
+    // through the core's direct fallback. Known unmatched processes still use
+    // final=direct; unidentified flows fail closed on Windows.
+    if platform==Platform::Windows {
+        routing.push(json!({"process_path_regex":["."],"invert":true,"action":"reject"}));
+    }
     Ok(json!({"log":{"level":"info","timestamp":false},
         "dns":{"servers":[{"type":"local","tag":"bootstrap"}]},
         "inbounds":[{"type":"tun","tag":"applications","interface_name":interface_name_for(platform,session)?,"address":["172.29.255.1/30","fd64:6e6f:6465::1/126"],"mtu":1500,"auto_route":true,"strict_route":false,"dns_mode":"disabled","stack":"mixed"}],
