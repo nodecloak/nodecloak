@@ -45,6 +45,9 @@ var sharingSchema string
 //go:embed mcp.sql
 var mcpSchema string
 
+//go:embed teams.sql
+var teamsSchema string
+
 func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 	tx, e := db.Begin(ctx)
 	if e != nil {
@@ -155,6 +158,18 @@ func Migrate(ctx context.Context, db *pgxpool.Pool) error {
 			return e
 		}
 	}
+	var v9 bool
+	if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_versions WHERE version=9)").Scan(&v9); e != nil {
+		return e
+	}
+	if !v9 {
+		if _, e = tx.Exec(ctx, teamsSchema); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(ctx, "INSERT INTO schema_versions(version) VALUES(9)"); e != nil {
+			return e
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -215,6 +230,7 @@ func New(db *pgxpool.Pool, c Config, m Mailer) *Server {
 	s.mux.HandleFunc("DELETE /v1/objects/{id}/lease", s.auth(true, s.releaseLease))
 	s.registerAdmin()
 	s.registerSharing()
+	s.registerTeams()
 	s.registerMCP()
 	return s
 }

@@ -18,8 +18,9 @@ import TerminalWorkspace from './TerminalWorkspace';
 import {useLanguage} from './LanguageControl';
 import BrowserProfiles from './BrowserProfiles';
 import {ShareProfileDialog,SharingWorkspace,useProfileSharing} from './ProfileSharing';
+import TeamWorkspace from './TeamWorkspace';
 import {effectiveShareStatus} from './profile-sharing';
-import {Share2} from 'lucide-react';
+import {Share2,UsersRound} from 'lucide-react';
 import BrowserIcon from './BrowserIcon';
 import BrowserSiteShortcuts from './BrowserSiteShortcuts';
 import AnnouncementCenter from './AnnouncementCenter';
@@ -36,18 +37,19 @@ import { getFontCatalog, removeUserFonts, type FontCatalog, type FontOutcome } f
 import { summarizeOutcomes } from './repair-result';
 import { getTimezoneCatalog, checkRepairReadiness, openTimezoneSettings, openFirefoxDownload, native, type BrowserDestination, scanEnvironment, getHistory, repairEnvironment, undoRepair, launchBrowser } from './bridge';
 
-type Page = 'profiles' | 'sharing' | 'computer' | 'overview' | 'code' | 'history' | 'settings' | 'account' | 'devices' | 'automation' | 'sync' | 'appProxy';
+type Page = 'profiles' | 'sharing' | 'teams' | 'computer' | 'overview' | 'code' | 'history' | 'settings' | 'account' | 'devices' | 'automation' | 'sync' | 'appProxy';
 type RepairRequest = { browser: BrowserId; ids: CheckId[]; consentTimezone: boolean; consentFonts: boolean; timezoneTarget: TimezoneTarget; customTimezone: string };
 type Modal = {kind:'fonts';catalog:FontCatalog;initialIds:string[]} | {kind:'font-result';outcomes:FontOutcome[]} | { kind: 'repair'; ids: CheckId[] } | { kind: 'detail'; id: CheckId } | { kind: 'undo'; record: RepairRecord } | { kind: 'help' } | { kind: 'result'; outcomes: Outcome[]; request: RepairRequest } | { kind: 'blocked'; request: RepairRequest; reason: string } | { kind: 'report' };
 const icons: Record<CheckId, ElementType> = { connection: Wifi, route: Globe2, webrtc: ShieldCheck, dns: LockKeyhole, language: Languages, timezone: Clock3, offset: Clock3, clock: Clock3, locale: Languages, cli: Terminal, fonts: Type, emoji: Fingerprint, webgl: Monitor, screen: Monitor, networkInfo: Wifi, plugins: Settings2, tracking: ShieldCheck };
 const nav: { id: Page; title: string; icon: ElementType }[] = [
-  {id:'profiles',title:'浏览器副本',icon:Globe2},{id:'appProxy',title:'应用代理',icon:Network},{id:'sync',title:'云端同步',icon:Cloud},{id:'sharing',title:'共享',icon:Share2},{id:'automation',title:'MCP',icon:PlugZap},{id:'computer',title:'电脑环境',icon:Monitor},
+  {id:'profiles',title:'浏览器副本',icon:Globe2},{id:'teams',title:'团队',icon:UsersRound},{id:'appProxy',title:'应用代理',icon:Network},{id:'sync',title:'云端同步',icon:Cloud},{id:'sharing',title:'共享',icon:Share2},{id:'automation',title:'MCP',icon:PlugZap},{id:'computer',title:'电脑环境',icon:Monitor},
   { id: 'overview', title: '环境概览', icon: LayoutDashboard }, { id: 'code', title: '终端', icon: Terminal }, { id: 'history', title: '修复记录', icon: History },
 ];
 const pageTitles: Record<Page, string> = {
   appProxy:'应用代理',
   automation:'MCP 与自动化',
   sync:'云端同步',
+  teams:'团队',
   profiles: '浏览器副本', sharing:'共享', computer: '电脑环境', overview: '环境概览', code: '终端', history: '修复记录', settings: '偏好设置', account:'个人资料',devices:'设备',
 };
 const browserNames = { chrome: 'Google Chrome', edge: 'Microsoft Edge', firefox: 'Firefox' };
@@ -274,12 +276,13 @@ export default function App() {
       <header className="topbar" data-tauri-drag-region="deep"><div className="breadcrumb">NodeCloak<ChevronRight size={12} /><span>{t(pageTitles[page])}</span></div><div className="topbar-right">{!native && <span className="demo-badge">{t("交互演示 · 不修改电脑")}</span>}{siteCatalog.supportURL&&<button className="telegram-group" title={siteCatalog.supportURL.startsWith('https://t.me/')?t("加入 Telegram 群"):t("帮助与说明")} disabled={!!busy} onClick={() => void perform('正在打开帮助', openCatalogSupport)}>{siteCatalog.supportURL.startsWith('https://t.me/')?<Send size={14}/>:<CircleHelp size={14}/>}<span>{siteCatalog.supportURL.startsWith('https://t.me/')?'Telegram Group':t('帮助与说明')}</span><ArrowUpRight size={13} /></button>}<span className="announcement-toolbar-slot" ref={setAnnouncementToolbar}/>{!!cloud.status.conflicts?.length&&<button className="icon-button sync-conflicts-button" disabled={!!busy} title={t('处理同步冲突')} aria-label={t('处理同步冲突')} onClick={()=>openSyncConflict(cloud.status.conflicts?.[0]?.localId)}><CircleAlert size={18}/><span className="sync-conflict-count">{new Set(cloud.status.conflicts.map(c=>c.localId)).size}</span></button>}{mcpPending&&<button className="icon-button mcp-pending" title={t("MCP 有待确认操作")} aria-label={t("MCP 有待确认操作")} onClick={()=>setPage('automation')}><PlugZap size={18}/></button>}<button className="icon-button" title={t("使用指南")} aria-label={t("使用指南")} onClick={() => setModal({ kind: 'help' })}><CircleHelp size={18} /></button><WindowControls onError={message => notify(message)} /></div></header>
       <div className="main-content">
         <AnnouncementCenter announcements={siteCatalog.announcements??[]} toolbarTarget={announcementToolbar}/>
-        {!['profiles','appProxy'].includes(page)&&<div className="page-heading"><div><h1>{t(pageTitles[page])}</h1>{['computer','overview'].includes(page)&&<p>{scan ? <>{t("上次检测：")}{timeLabel(scan.checkedAt)}</> : t("尚无检测结果，点击右上角“重新检测”开始。")}</p>}</div>{!['settings','account','devices','sharing','automation','sync','appProxy'].includes(page)&&<button className="button secondary" style={{visibility:page==='code'?'hidden':undefined}} disabled={!!busy} onClick={() => page==='history' ? perform('正在读取修复记录',async()=>{await refreshHistory();notify('修复记录已更新');}) : perform('正在重新检测', async () => { await refresh(); })}><RefreshCw size={15} className={(page==='history'?historyLoading.has(environmentScopeKey(currentScope.current)):busy?.includes('检测')) ? 'spin' : ''} />{t(page==='history' ? historyLoading.has(environmentScopeKey(currentScope.current))?'正在读取修复记录':'刷新记录' : busy?.includes('检测') ? '正在检测' : '重新检测')}</button>}</div>}
+        {!['profiles','appProxy','teams'].includes(page)&&<div className="page-heading"><div><h1>{t(pageTitles[page])}</h1>{['computer','overview'].includes(page)&&<p>{scan ? <>{t("上次检测：")}{timeLabel(scan.checkedAt)}</> : t("尚无检测结果，点击右上角“重新检测”开始。")}</p>}</div>{!['settings','account','devices','sharing','automation','sync','appProxy'].includes(page)&&<button className="button secondary" style={{visibility:page==='code'?'hidden':undefined}} disabled={!!busy} onClick={() => page==='history' ? perform('正在读取修复记录',async()=>{await refreshHistory();notify('修复记录已更新');}) : perform('正在重新检测', async () => { await refresh(); })}><RefreshCw size={15} className={(page==='history'?historyLoading.has(environmentScopeKey(currentScope.current)):busy?.includes('检测')) ? 'spin' : ''} />{t(page==='history' ? historyLoading.has(environmentScopeKey(currentScope.current))?'正在读取修复记录':'刷新记录' : busy?.includes('检测') ? '正在检测' : '重新检测')}</button>}</div>}
 
         <AppUpdates expanded={page === 'settings'} busy={!!busy} onBusyChange={value=>setBusy(value?'正在更新应用':null)} />
         {(page==='sync'||(page==='account'||page==='devices')&&cloud.status.account)&&<AccountDialog key={cloud.status.account?.id||'signed-out'} inline cloud={{...cloud,panel:page as 'sync'|'account'|'devices'}} focusProfileId={syncTarget}/>}
         {page==='profiles'&&<BrowserProfiles onSelect={(p,history)=>void selectProfile(p,history)} onShare={setShareProfile} onManageSharing={()=>setPage('sharing')} syncConflicts={cloud.status.conflicts} onResolveSync={openSyncConflict} onSyncStatusChange={()=>void cloud.reload()} onProfileReset={handleProfileReset} busy={!!busy||sharing.busy} onBusyChange={value=>setBusy(value?'正在管理浏览器副本':null)}/>}
         {page==='sharing'&&<SharingWorkspace sharing={sharing} cloud={cloud}/>}
+        {page==='teams'&&<TeamWorkspace sharing={sharing} cloud={cloud} onProfiles={()=>setPage('profiles')}/>}
         {page==='appProxy'&&<ApplicationProxy/>}
         <ShareProfileDialog profile={shareProfile} sharing={sharing} cloud={cloud} onClose={()=>setShareProfile(null)}/>
         {activeProfile&&['overview','history'].includes(page)&&<div className="active-profile-bar"><div className={page==='overview'?'overview-profile-identity':undefined}>{page==='overview'?<label className="overview-profile-picker"><span>{t("当前副本")}</span><SelectMenu menuMinWidth={320} noWrap label={t("切换浏览器副本")} disabled={!!busy} value={activeProfile.id} onOpen={()=>void loadProfileOptions().catch(e=>notify(String(e),true))} onChange={value=>{const p=profileOptions.find(p=>p.id===value);if(p&&p.id!==activeProfile.id)void selectProfile(p);}} options={(!profileOptions.some(p=>p.id===activeProfile.id)?[activeProfile,...profileOptions]:profileOptions).map(p=>({value:p.id,label:`${p.name} · ${browserNames[p.browser]}`,icon:<BrowserIcon browser={p.browser}/>}))} /></label>:<strong>{activeProfile.name}</strong>}<span>{t(browserNames[browser])} · {t(activeProfile.proxy.mode==='system'?'系统代理':activeProfile.proxy.mode==='direct'?'直连':activeProfile.proxy.host+':'+activeProfile.proxy.port)}</span></div><button disabled={!!busy} className={page==='overview'?'selected':''} onClick={()=>setPage('overview')}>{t("环境检测")}</button><button disabled={!!busy} className={page==='history'?'selected':''} onClick={()=>void navigate('history')}>{t("修复记录")}</button><button disabled={!!busy} onClick={()=>setPage('profiles')}>{t("返回列表")}</button></div>}

@@ -19,6 +19,7 @@ pub mod scheduler;
 pub mod sharing;
 pub mod session_sync;
 pub mod sync;
+pub mod teams;
 pub mod vault;
 #[cfg(test)]
 mod sync_tolerance_tests;

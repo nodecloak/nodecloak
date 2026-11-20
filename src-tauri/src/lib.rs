@@ -624,6 +624,7 @@ pub fn run() {
             mcp::mcp_action,
             profile_commands::generate_fingerprint_seed,
             cloud::sharing::sharing_action,
+            cloud::teams::team_action,
             browser_sites::get_browser_site_catalog,
             browser_sites::get_browser_site_icon,
             browser_sites::open_catalog_support,

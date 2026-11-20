@@ -14,6 +14,7 @@ import (
 // is included in metadata, and only an accepted, addressed approved device can read it.
 type shareSummary struct {
 	ID              string     `json:"id"`
+	TeamID          string     `json:"teamId,omitempty"`
 	SourceProfileID string     `json:"sourceProfileId"`
 	ProfileName     string     `json:"profileName"`
 	Browser         string     `json:"browser"`
@@ -32,10 +33,10 @@ type shareSummary struct {
 	DeviceAccess    string     `json:"deviceAccess,omitempty"`
 }
 
-const shareColumns = `id::text,source_profile_id,profile_name,browser,sender_id::text,sender_name,sender_email,recipient_id::text,recipient_name,recipient_email,includes_session,note,status,created_at,expires_at,accepted_at`
+const shareColumns = `id::text,source_profile_id,profile_name,browser,sender_id::text,sender_name,sender_email,recipient_id::text,recipient_name,recipient_email,includes_session,note,status,created_at,expires_at,accepted_at,COALESCE(team_id::text,'')`
 
 func scanShare(row pgx.Row, v *shareSummary) error {
-	return row.Scan(&v.ID, &v.SourceProfileID, &v.ProfileName, &v.Browser, &v.SenderID, &v.SenderName, &v.SenderEmail, &v.RecipientID, &v.RecipientName, &v.RecipientEmail, &v.IncludesSession, &v.Note, &v.Status, &v.CreatedAt, &v.ExpiresAt, &v.AcceptedAt)
+	return row.Scan(&v.ID, &v.SourceProfileID, &v.ProfileName, &v.Browser, &v.SenderID, &v.SenderName, &v.SenderEmail, &v.RecipientID, &v.RecipientName, &v.RecipientEmail, &v.IncludesSession, &v.Note, &v.Status, &v.CreatedAt, &v.ExpiresAt, &v.AcceptedAt, &v.TeamID)
 }
 func (s *Server) registerSharing() {
 	s.mux.HandleFunc("POST /v1/shares/recipient", s.auth(false, s.shareRecipient))
@@ -124,7 +125,7 @@ func shareLive(status string) bool { return status == "pending" || status == "ac
 // All participating users are locked in ID order before a grant is locked.
 // This follows account revocation's account-first order without sender/recipient deadlocks.
 func (s *Server) shareLockAccounts(ctx context.Context, tx pgx.Tx, i identity, other string, approved bool) error {
-	rows, e := tx.Query(ctx, "SELECT id FROM users WHERE id=$1 OR id=$2 ORDER BY id FOR UPDATE", i.Account, other)
+	rows, e := tx.Query(ctx, "SELECT id FROM users WHERE id=$1 OR id=$2 ORDER BY id FOR NO KEY UPDATE", i.Account, other)
 	if e != nil {
 		return e
 	}
@@ -152,6 +153,8 @@ func (s *Server) shareCreate(w http.ResponseWriter, r *http.Request, i identity)
 	defer release()
 	var in struct {
 		ID              string    `json:"id"`
+		TeamID          string    `json:"teamId"`
+		TeamMemberID    string    `json:"teamMemberId"`
 		SourceProfileID string    `json:"sourceProfileId"`
 		ProfileName     string    `json:"profileName"`
 		Browser         string    `json:"browser"`
@@ -180,6 +183,10 @@ func (s *Server) shareCreate(w http.ResponseWriter, r *http.Request, i identity)
 		failure(w, 400, "invalid_share")
 		return
 	}
+	if (in.TeamID == "") != (in.TeamMemberID == "") || in.TeamID != "" && (!validID(in.TeamID) || !validID(in.TeamMemberID) || in.IncludesSession) {
+		failure(w, 400, "invalid_team_assignment")
+		return
+	}
 	tx, e := s.db.Begin(r.Context())
 	if e != nil {
 		failure(w, 503, "database_unavailable")
@@ -189,6 +196,30 @@ func (s *Server) shareCreate(w http.ResponseWriter, r *http.Request, i identity)
 	if s.shareLockAccounts(r.Context(), tx, i, in.RecipientID, false) != nil {
 		failure(w, 401, "unauthorized")
 		return
+	}
+	if in.TeamID != "" {
+		// Serialize assignment creation with removal and protect the recipient's
+		// membership across encryption uploads made from a stale member list.
+		ctx := r.Context()
+		owner, err := teamOwner(ctx, tx, in.TeamID)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && owner != i.Account {
+			failure(w, 404, "team_not_found")
+			return
+		}
+		if err != nil {
+			failure(w, 503, "database_unavailable")
+			return
+		}
+		var active bool
+		err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM team_memberships WHERE team_id=$1 AND user_id=$2 AND id=$3 AND status='active')", in.TeamID, in.RecipientID, in.TeamMemberID).Scan(&active)
+		if err != nil {
+			failure(w, 503, "database_unavailable")
+			return
+		}
+		if !active {
+			failure(w, 409, "team_member_inactive")
+			return
+		}
 	}
 	// Waiting for a competing account operation must not admit a deadline
 	// which elapsed before the invitation is actually persisted.
@@ -253,7 +284,13 @@ func (s *Server) shareCreate(w http.ResponseWriter, r *http.Request, i identity)
 		failure(w, 409, "share_id_conflict")
 		return
 	}
-	_, e = tx.Exec(r.Context(), `INSERT INTO profile_shares(id,sender_id,recipient_id,source_profile_id,profile_name,browser,sender_name,sender_email,recipient_name,recipient_email,includes_session,note,status,created_at,expires_at,payload,writer) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,$14,$15,$16)`, in.ID, i.Account, recipient, in.SourceProfileID, in.ProfileName, in.Browser, senderName, senderEmail, in.RecipientName, email, in.IncludesSession, in.Note, now, in.ExpiresAt, in.Payload, in.Writer)
+	inserted, e := tx.Exec(r.Context(), `INSERT INTO profile_shares(id,sender_id,recipient_id,source_profile_id,profile_name,browser,sender_name,sender_email,recipient_name,recipient_email,includes_session,note,status,created_at,expires_at,payload,writer,team_id)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,$14,$15,$16,NULLIF($17,'')::uuid)
+		ON CONFLICT(team_id,recipient_id,source_profile_id) WHERE team_id IS NOT NULL AND status IN ('pending','accepted') DO NOTHING`, in.ID, i.Account, recipient, in.SourceProfileID, in.ProfileName, in.Browser, senderName, senderEmail, in.RecipientName, email, in.IncludesSession, in.Note, now, in.ExpiresAt, in.Payload, in.Writer, in.TeamID)
+	if e == nil && inserted.RowsAffected() == 0 {
+		failure(w, 409, "team_assignment_exists")
+		return
+	}
 	for _, d := range in.Envelopes {
 		if e == nil {
 			_, e = tx.Exec(r.Context(), "INSERT INTO profile_share_envelopes(share_id,device_id,public_key,envelope) VALUES($1,$2,$3,$4)", in.ID, d.DeviceID, d.PublicKey, d.Envelope)

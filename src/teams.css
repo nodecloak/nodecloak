@@ -1,0 +1,18 @@
+.team-workspace,.team-detail{display:grid;gap:18px;min-width:0}
+.team-workspace .team-hero{margin-bottom:0}
+.team-layout{display:grid;grid-template-columns:minmax(210px,260px) minmax(0,1fr);align-items:start;gap:18px}
+.team-list,.team-members{display:grid;gap:10px}
+.team-list h3,.team-members h4{margin:0 0 4px}
+.team-choice{display:grid;gap:5px;width:100%;padding:12px;text-align:left;border:1px solid var(--control-border);border-radius:12px;background:var(--control-bg);color:var(--text);font:inherit;cursor:pointer;overflow-wrap:anywhere}
+.team-choice[aria-pressed=true]{border-color:var(--green)}
+.team-choice small,.team-section-heading p,.team-row p{color:var(--muted);font-size:12px;margin:0;overflow-wrap:anywhere}
+.team-section-heading,.team-row,.team-confirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.team-section-heading h3,.team-section-heading>div,.team-row>div,.team-row>p,.team-confirm>div{flex:1;min-width:120px;overflow-wrap:anywhere}
+.team-row{padding:12px 0;border-top:1px solid var(--card-border)}
+.team-row strong{display:block;margin-bottom:4px}
+.team-members,.team-form,.team-confirm{margin-top:16px}
+.team-form .button{justify-self:start}
+.team-assignment{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(100px,.5fr);gap:12px}
+.team-assignment label{min-width:0}
+@media(max-width:1160px){.team-assignment{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:760px){.team-layout{grid-template-columns:minmax(0,1fr)}}

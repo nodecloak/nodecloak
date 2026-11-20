@@ -22,6 +22,8 @@ use tauri::{Emitter, Manager};
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
     pub source_profile_id: String,
     pub profile_name: String,
     pub browser: String,
@@ -142,6 +144,12 @@ fn summary(value: &Value) -> Result<Summary, String> {
     for id in [&s.id, &s.sender_id, &s.recipient_id] {
         uuid::Uuid::parse_str(id).map_err(|_| "共享标识无效")?;
     }
+    if let Some(team_id) = &s.team_id {
+        uuid::Uuid::parse_str(team_id).map_err(|_| "团队标识无效")?;
+        if s.includes_session {
+            return Err("团队副本只允许分配浏览器配置".into());
+        }
+    }
     timestamp(&s.expires_at)?;
     if ![
         "pending", "accepted", "declined", "revoked", "left", "expired",
@@ -179,6 +187,13 @@ struct Payload {
     document: Document,
     session: Option<Snapshot>,
 }
+
+fn team_document(mut profile: profiles::Profile) -> Result<Document, String> {
+    profile.proxy = crate::proxy::ProxyConfig::system();
+    profile.notes.clear();
+    Document::export(&profile)
+}
+
 impl Payload {
     fn parse(bytes: &[u8], s: &Summary) -> Result<Self, String> {
         let p: Self = serde_json::from_slice(bytes).map_err(|_| "共享快照格式无效")?;
@@ -218,6 +233,8 @@ pub enum Action {
         expires_at: String,
         includes_session: bool,
         note: String,
+        #[serde(default)]
+        team: Option<TeamAssignment>,
     },
     Accept {
         id: String,
@@ -240,6 +257,14 @@ pub enum Action {
         id: String,
         expires_at: String,
     },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TeamAssignment {
+    account_id: uuid::Uuid,
+    team_id: uuid::Uuid,
+    member_id: uuid::Uuid,
 }
 type Deadlines = Arc<Mutex<BTreeMap<String, (Instant, String)>>>;
 fn deadlines() -> Deadlines {
@@ -389,7 +414,12 @@ pub async fn sharing_action(app: tauri::AppHandle, action: Action) -> Result<Val
                     }
                 }}store.save(root)?; v
             }
-            Action::Create{profile_id,name,email,expires_at,includes_session,note}=>{
+            Action::Create{profile_id,name,email,expires_at,includes_session,note,team}=>{
+                if let Some(target) = &team {
+                    if target.account_id.to_string() != account || includes_session || !note.is_empty() {
+                        return Err("团队副本只允许分配浏览器配置".into());
+                    }
+                }
                 if timestamp(&expires_at)?<=chrono::Utc::now().timestamp(){return Err("请选择未来的共享截止时间".into())}
                 let recipient=c.request(Method::POST,"/v1/shares/recipient",Some(&json!({"name":name,"email":email})))?;
                 let recipient_id=recipient["account"]["id"].as_str().ok_or("接收账号无效")?;
@@ -399,7 +429,8 @@ pub async fn sharing_action(app: tauri::AppHandle, action: Action) -> Result<Val
                 let payload={let guard=app.state::<OperationLock>();let _lock=guard.0.lock().map_err(|_|"操作锁不可用")?;
                     editable(root,&profile_id)?;let p=profiles::get(root,&profile_id,false)?;
                     let session=if includes_session {let path=profiles::path(root,&p)?;platform::ensure_profile_closed(&path)?;Some(super::browser_session::export_profile(&p.browser,&path)?)}else{None};
-                    Payload{schema:1,id:id.clone(),sender_id:account.clone(),recipient_id:recipient_id.into(),source_profile_id:profile_id.clone(),includes_session,document:Document::export(&p)?,session}
+                    let document=if team.is_some(){team_document(p)?}else{Document::export(&p)?};
+                    Payload{schema:1,id:id.clone(),sender_id:account.clone(),recipient_id:recipient_id.into(),source_profile_id:profile_id.clone(),includes_session,document,session}
                 };
                 let key=crypto::random_key()?;
                 let encrypted=crypto::seal(&key,&context(&account,&id,&c.device.id),&zeroize::Zeroizing::new(serde_json::to_vec(&payload).map_err(|_|"共享快照无效")?))?;
@@ -407,7 +438,12 @@ pub async fn sharing_action(app: tauri::AppHandle, action: Action) -> Result<Val
                 for device in devices {let device_id=device["id"].as_str().ok_or("接收设备无效")?;let public=device["publicKey"].as_str().ok_or("接收设备密钥无效")?;
                     envelopes.push(json!({"deviceId":device_id,"publicKey":public,"envelope":crypto::device_seal(&*vault::decode_key(public)?,&scope,device_id,1,&key)?}));
                 }
-                c.request(Method::POST,"/v1/shares",Some(&json!({"id":id,"sourceProfileId":profile_id,"profileName":payload.document.name,"browser":payload.document.browser,"recipientId":recipient_id,"recipientName":name,"recipientEmail":email,"expiresAt":expires_at,"includesSession":includes_session,"note":note,"payload":serde_json::to_string(&encrypted).map_err(|_|"共享加密无效")?,"writer":c.device.id,"envelopes":envelopes})))?["share"].clone()
+                let mut request=json!({"id":id,"sourceProfileId":profile_id,"profileName":payload.document.name,"browser":payload.document.browser,"recipientId":recipient_id,"recipientName":name,"recipientEmail":email,"expiresAt":expires_at,"includesSession":includes_session,"note":note,"payload":serde_json::to_string(&encrypted).map_err(|_|"共享加密无效")?,"writer":c.device.id,"envelopes":envelopes});
+                if let Some(target) = team {
+                    request["teamId"] = json!(target.team_id);
+                    request["teamMemberId"] = json!(target.member_id);
+                }
+                c.request(Method::POST,"/v1/shares",Some(&request))?["share"].clone()
             }
             Action::Accept{id,authorize_device}=>{
                 uuid::Uuid::parse_str(&id).map_err(|_|"共享标识无效")?;
@@ -576,6 +612,7 @@ mod tests {
     fn share() -> Summary {
         Summary {
             id: uuid::Uuid::new_v4().to_string(),
+            team_id: None,
             source_profile_id: "source".into(),
             profile_name: "Shared".into(),
             browser: "chrome".into(),
@@ -615,6 +652,32 @@ mod tests {
         assert!(!visible(root.path(), &id).unwrap());
         assert!(before_launch(root.path(), &id).is_err());
         assert!(!restricted(root.path(), "ordinary").unwrap());
+    }
+    #[test]
+    fn team_snapshot_does_not_read_or_send_the_source_proxy_credentials() {
+        let root = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let draft = profiles::Draft {
+            name: "Team configuration".into(),
+            browser: "chrome".into(),
+            notes: "Private operator notes".into(),
+            tags: vec![],
+            proxy: crate::proxy::ProxyConfig::system(),
+            password: None,
+            clear_password: false,
+            preferences: profiles::Preferences::default(),
+        };
+        let mut profile = profiles::create(root.path(), draft, None).unwrap();
+        profile.proxy.mode = "socks5".into();
+        profile.proxy.host = "proxy.example.test".into();
+        profile.proxy.port = 1080;
+        profile.proxy.username = "private-user".into();
+        profile.proxy.credential_ref = Some("missing-fixture-credential".into());
+        let doc = team_document(profile).unwrap();
+        assert_eq!(doc.name, "Team configuration");
+        assert_eq!(doc.proxy.mode, "system");
+        assert!(doc.proxy.host.is_empty() && doc.proxy.username.is_empty() && doc.proxy.password.is_empty());
+        assert!(doc.proxy.node.is_none() && doc.proxy.api_url.is_none() && doc.proxy.pre_proxy.is_none());
+        assert!(doc.notes.is_empty());
     }
     #[test]
     fn share_key_only_opens_for_addressed_grant_and_device() {

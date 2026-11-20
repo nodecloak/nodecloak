@@ -46,11 +46,14 @@
 | **稳定指纹与区域设置** | 新副本使用独立指纹种子，同一副本重启后保持稳定；可重新生成，并设置语言、时区及 Canvas、字体、WebGL、音频、媒体设备噪音 |
 | **应用代理** | 为指定程序选择节点，按程序路径分流，并查看实际匹配的连接与流量 |
 | **多设备同步** | 加密同步副本配置和可迁移的网站登录状态，在同步页面查看进度和处理冲突 |
+| **团队** | 创建工作区、邀请成员并分配副本配置。成员使用自己的账号加入，退出或被移除时撤销团队副本授权 |
 | **MCP 自动化** | 授权 AI 客户端管理副本、读取网页、点击、填表、截图，以及上传和下载文件 |
 | **终端启动器** | 从指定目录打开 Claude Code、Codex CLI、Gemini CLI 或普通终端，为各工具保存时区、语言和环境变量 |
 | **环境检测与修复** | 查看网络出口和浏览器环境，检查系统时间等设置，查看启动日志及修改记录 |
 
 浏览器副本支持 Windows、macOS 和 Ubuntu 24.04 及以上 x64。应用代理支持 Windows 和 macOS，Linux 暂不可用。不同浏览器对高级设置的支持方式有所不同。
+
+在侧边栏打开「团队」，创建团队并用对方的 NodeCloak 用户名和邮箱发送邀请。对方加入后，你可以分配副本。成员接受后从「浏览器副本」启动，使用自己的系统代理和网站登录。
 
 ## 下载
 
@@ -62,12 +65,12 @@
 | Windows x64，想直接运行 | `_windows_x64_portable.exe` | 下载后直接打开 |
 | macOS，Apple Silicon / M 系列 | `_macos_arm64.dmg` | 将应用拖入 Applications |
 | macOS，Intel | `_macos_x64.dmg` | 将应用拖入 Applications |
-| Ubuntu 24.04+ x64 | `_linux_x64.deb` | 使用 `sudo apt install ./NodeCloak_5.0.3_linux_x64.deb` 安装 |
+| Ubuntu 24.04+ x64 | `_linux_x64.deb` | 使用 `sudo apt install ./NodeCloak_5.1.0_linux_x64.deb` 安装 |
 | Ubuntu 24.04+ x64，想直接运行 | `_linux_x64.AppImage` | 允许文件作为程序执行后打开 |
 
 Windows、macOS 和 Linux AppImage 用户可以在应用内检查更新。Windows 便携版通过应用内更新时会安装安装版，原便携文件保留。Ubuntu deb 用户请下载新版后重新安装；已有副本和设置继续保留。
 
-Ubuntu 需要 X11 或提供 XWayland 的桌面环境。AppImage 首次使用可运行 `chmod +x ./NodeCloak_5.0.3_linux_x64.AppImage`，再双击或从终端启动。若提示缺少 FUSE 2，可安装 `libfuse2t64`，或选择 deb 安装包。请使用原生 Chrome、Edge 或 Mozilla Firefox 的 deb / tar 版本；Snap / Flatpak 浏览器暂不支持，其沙箱限制专用副本目录与扩展宿主访问。
+Ubuntu 需要 X11 或提供 XWayland 的桌面环境。AppImage 首次使用可运行 `chmod +x ./NodeCloak_5.1.0_linux_x64.AppImage`，再双击或从终端启动。若提示缺少 FUSE 2，可安装 `libfuse2t64`，或选择 deb 安装包。请使用原生 Chrome、Edge 或 Mozilla Firefox 的 deb / tar 版本；Snap / Flatpak 浏览器暂不支持，其沙箱限制专用副本目录与扩展宿主访问。
 
 ## 快速上手
 
